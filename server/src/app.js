@@ -9,6 +9,7 @@ import customersRouter from "./routes/customers.js";
 import employeesRouter from "./routes/employees.js";
 import promotionsRouter from "./routes/promotions.js";
 import reviewsRouter from "./routes/reviews.js";
+import categoriesRouter from "./routes/categories.js";
 
 const app = express();
 app.use(cors());
@@ -21,6 +22,7 @@ app.use("/api/reviews", reviewsRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
+app.use("/api/categories", categoriesRouter);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
