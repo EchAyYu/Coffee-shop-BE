@@ -1,0 +1,48 @@
+[
+  {
+    "id": 1,
+    "name": "Phin Sữa Đá",
+    "category": "Cà phê",
+    "image": "/images/phin-sua-da.jpg",
+    "description": "Đậm vị cà phê Việt, beo béo sữa đặc.",
+    "prices": {
+      "S": 29000,
+      "M": 35000,
+      "L": 39000
+    },
+    "rating": 4.7,
+    "badges": [
+      "signature"
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Freeze Trà Xanh",
+    "category": "Freeze",
+    "image": "/images/freeze-tra-xanh.jpg",
+    "description": "Kem đá xay mát lạnh vị trà xanh.",
+    "prices": {
+      "S": 45000,
+      "M": 52000,
+      "L": 59000
+    },
+    "rating": 4.5,
+    "badges": [
+      "bestseller"
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Trà Sen Vàng",
+    "category": "Trà",
+    "image": "/images/tra-sen-vang.jpg",
+    "description": "Hương trà thanh, thoảng vị sen.",
+    "prices": {
+      "S": 30000,
+      "M": 36000,
+      "L": 42000
+    },
+    "rating": 4.6,
+    "badges": []
+  }
+]
