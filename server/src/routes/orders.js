@@ -1,9 +1,13 @@
 import { Router } from "express";
-import { createOrder, getOrders, getOrderById } from "../controllers/orders.controller.js";
+import { createOrder, getOrders, getOrderById, updateOrderStatus } from "../controllers/orders.controller.js";
+import { authMiddleware, authorizeRoles } from "../middlewares/authMiddleware.js";
 
 const r = Router();
-r.post("/", createOrder);
-r.get("/", getOrders);
-r.get("/:id", getOrderById);
+
+// 🟢 API Đơn hàng
+r.post("/", createOrder); // khách đặt hàng
+r.get("/", authMiddleware, authorizeRoles("admin", "employee"), getOrders);
+r.get("/:id", authMiddleware, authorizeRoles("admin", "employee"), getOrderById);
+r.put("/:id", authMiddleware, authorizeRoles("admin", "employee"), updateOrderStatus);
 
 export default r;

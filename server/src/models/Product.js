@@ -7,6 +7,10 @@ const Product = sequelize.define("Product", {
     autoIncrement: true,
     primaryKey: true,
   },
+  id_dm: {
+    type: DataTypes.INTEGER,
+    allowNull: false,            
+  },
   ten_mon: {
     type: DataTypes.STRING(100),
     allowNull: false,

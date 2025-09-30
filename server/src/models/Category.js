@@ -8,7 +8,7 @@ const Category = sequelize.define("Category", {
     primaryKey: true,
   },
   ten_dm: {
-    type: DataTypes.STRING(200),
+    type: DataTypes.STRING(100),
     allowNull: false,
   },
   anh: {

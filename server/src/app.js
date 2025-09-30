@@ -10,6 +10,9 @@ import employeesRouter from "./routes/employees.js";
 import promotionsRouter from "./routes/promotions.js";
 import reviewsRouter from "./routes/reviews.js";
 import categoriesRouter from "./routes/categories.js";
+import adminRouter from "./routes/admin.js";
+import { authMiddleware, authorizeRoles, requireAuth, requireAdmin } from "./middlewares/authMiddleware.js";
+
 
 const app = express();
 app.use(cors());
@@ -23,7 +26,7 @@ app.use("/api/products", productsRouter);
 app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
 app.use("/api/categories", categoriesRouter);
-
+app.use("/api/admin", adminRouter);
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 4000;

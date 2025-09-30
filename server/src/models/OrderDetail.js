@@ -9,6 +9,14 @@ const OrderDetail = sequelize.define("OrderDetail", {
     autoIncrement: true,
     primaryKey: true,
   },
+  id_don: {   // ✅ FK cho dễ đọc
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
+  id_mon: {   // ✅ FK cho dễ đọc
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
   so_luong: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -22,9 +30,11 @@ const OrderDetail = sequelize.define("OrderDetail", {
   timestamps: false,
 });
 
+// Quan hệ với Order
 OrderDetail.belongsTo(Order, { foreignKey: "id_don" });
 Order.hasMany(OrderDetail, { foreignKey: "id_don" });
 
+// Quan hệ với Product
 OrderDetail.belongsTo(Product, { foreignKey: "id_mon" });
 Product.hasMany(OrderDetail, { foreignKey: "id_mon" });
 
