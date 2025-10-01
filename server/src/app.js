@@ -12,6 +12,10 @@ import reviewsRouter from "./routes/reviews.js";
 import categoriesRouter from "./routes/categories.js";
 import adminRouter from "./routes/admin.js";
 import { authMiddleware, authorizeRoles, requireAuth, requireAdmin } from "./middlewares/authMiddleware.js";
+import adminRoutes from "./routes/admin.js";
+import orderRoutes from "./routes/orders.js";
+import "./models/_associations.js";
+import dotenv from "dotenv";
 
 
 const app = express();
@@ -28,6 +32,8 @@ app.use("/api/reservations", reservationsRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/admin", adminRouter);
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+app.use("/api/admin", adminRoutes);
+app.use("/api/orders", orderRoutes);
 
 const PORT = process.env.PORT || 4000;
 

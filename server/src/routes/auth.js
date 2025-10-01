@@ -1,11 +1,13 @@
 import { Router } from "express";
-import { register, login, me } from "../controllers/auth.controller.js";
-import { authMiddleware } from "../middlewares/authMiddleware.js";
+import { register, login, me, changePassword } from "../controllers/auth.controller.js";
+import { requireAuth } from "../middlewares/authMiddleware.js";
 
-const r = Router();
+const router = Router();
 
-r.post("/register", register);
-r.post("/login", login);
-r.get("/me", authMiddleware, me);
+// Auth routes
+router.post("/register", register);
+router.post("/login", login);
+router.get("/me", requireAuth, me);
+router.put("/change-password", requireAuth, changePassword);
 
-export default r;
+export default router;

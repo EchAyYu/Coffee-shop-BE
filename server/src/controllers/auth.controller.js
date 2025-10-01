@@ -2,8 +2,12 @@ import Account from "../models/Account.js";
 import Customer from "../models/Customer.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
+dotenv.config();
 
-const JWT_SECRET = "secretkey"; // TODO: cho vào .env
+
+const SECRET = process.env.JWT_SECRET || "secretkey";
+
 
 // 🟢 Đăng ký (tạo Account + Customer)
 export async function register(req, res) {
@@ -44,25 +48,27 @@ export async function register(req, res) {
 export async function login(req, res) {
   try {
     const { ten_dn, mat_khau } = req.body;
+    const acc = await Account.findOne({ where: { ten_dn } });
+    if (!acc) return res.status(401).json({ message: "Sai tài khoản hoặc mật khẩu" });
 
-    // Tìm tài khoản
-    const account = await Account.findOne({ where: { ten_dn } });
-    if (!account) return res.status(400).json({ message: "Sai tên đăng nhập hoặc mật khẩu" });
+    let ok = false;
+    if (acc.mat_khau.startsWith("$2b$")) {
+      ok = await bcrypt.compare(mat_khau, acc.mat_khau);
+    } else {
+      ok = mat_khau === acc.mat_khau;
+    }
+    if (!ok) return res.status(401).json({ message: "Sai tài khoản hoặc mật khẩu" });
 
-    // So sánh mật khẩu
-    const match = await bcrypt.compare(mat_khau, account.mat_khau);
-    if (!match) return res.status(400).json({ message: "Sai tên đăng nhập hoặc mật khẩu" });
-
-    // Tạo token JWT
+    // Ký token với SECRET đồng bộ
     const token = jwt.sign(
-      { id_tk: account.id_tk, ten_dn: account.ten_dn, role: account.role },
-      JWT_SECRET,
-      { expiresIn: "2h" }
+      { id_tk: acc.id_tk, role: acc.role, ten_dn: acc.ten_dn },
+      SECRET,
+      { expiresIn: "1d" }
     );
 
-    res.json({ message: "Đăng nhập thành công", token, account });
+    res.json({ token });
   } catch (err) {
-    console.error("❌ login error:", err);
+    console.error("[login]", err);
     res.status(500).json({ message: "Lỗi server" });
   }
 }

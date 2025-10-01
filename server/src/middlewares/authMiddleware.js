@@ -1,37 +1,51 @@
-import jwt from "jsonwebtoken";
+// server/src/middlewares/authMiddleware.js
 import Account from "../models/Account.js";
+import jwt from "jsonwebtoken";
 
-export function requireAuth(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ message: "Chưa đăng nhập" });
-  }
+const SECRET = process.env.JWT_SECRET || "secretkey";
 
+// Lấy token từ header Authorization: Bearer <token>
+function getToken(req) {
+  const h = req.headers.authorization || "";
+  const [scheme, token] = h.split(" ");
+  return scheme?.toLowerCase() === "bearer" ? token : null;
+}
+
+// Bắt buộc đăng nhập
+export async function requireAuth(req, res, next) {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret");
-    req.user = decoded;
+    const token = getToken(req);
+    if (!token) return res.status(401).json({ message: "Chưa đăng nhập" });
+
+    const payload = jwt.verify(token, SECRET);
+    // payload nên chứa: { id_tk, role, ten_dn, iat, exp }
+    const acc = await Account.findByPk(payload.id_tk);
+    if (!acc) return res.status(401).json({ message: "Tài khoản không tồn tại" });
+
+    req.user = { id_tk: acc.id_tk, role: acc.role, ten_dn: acc.ten_dn, email: acc.email };
     next();
   } catch (err) {
     return res.status(401).json({ message: "Token không hợp lệ" });
   }
 }
 
-// Middleware chỉ cho phép Admin
-export function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== "admin") {
-    return res.status(403).json({ message: "Bạn không có quyền admin" });
-  }
-  next();
-}
+// Cho tương thích code cũ
+export const authMiddleware = requireAuth;
 
-export function authMiddleware(req, res, next) {
-  // Dummy authentication logic
-  next();
-}
-
+// Yêu cầu có 1 trong các vai trò
 export function authorizeRoles(...roles) {
   return (req, res, next) => {
-    // Dummy role authorization logic
+    if (!req.user?.role) return res.status(401).json({ message: "Chưa đăng nhập" });
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: "Không có quyền truy cập" });
+    }
     next();
   };
+}
+
+// Chỉ admin
+export function requireAdmin(req, res, next) {
+  if (!req.user?.role) return res.status(401).json({ message: "Chưa đăng nhập" });
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Chỉ admin" });
+  next();
 }
