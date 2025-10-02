@@ -8,31 +8,25 @@ const Customer = sequelize.define("Customer", {
     autoIncrement: true,
     primaryKey: true,
   },
-  ho_ten: {
-    type: DataTypes.STRING(100),
-    allowNull: false,
-  },
-  email: {
-    type: DataTypes.STRING(100),
-    unique: true,
-  },
-  sdt: {
-    type: DataTypes.STRING(20),
-  },
-  dia_chi: {
-    type: DataTypes.STRING(200),
-  },
-  anh: {
-    type: DataTypes.STRING(200),
-  },
-  diem: {
+  id_tk: {
     type: DataTypes.INTEGER,
-    defaultValue: 0,
+    allowNull: false,
+    references: {
+      model: "tai_khoan", // hoặc "Account" nếu tableName là account
+      key: "id_tk",
+    },
   },
+  ho_ten: DataTypes.STRING(100),
+  email: DataTypes.STRING(100),
+  sdt: DataTypes.STRING(20),
+  dia_chi: DataTypes.STRING(200),
+  anh: DataTypes.STRING(200),
+  diem: { type: DataTypes.INTEGER, defaultValue: 0 },
 }, {
   tableName: "khach_hang",
   timestamps: false,
 });
+
 
 Customer.belongsTo(Account, { foreignKey: "id_tk" });
 Account.hasOne(Customer, { foreignKey: "id_tk" });
