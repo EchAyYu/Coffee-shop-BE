@@ -11,7 +11,7 @@ import {
   deleteCustomer
 } from "../controllers/customers.controller.js";
 import {
-  getOrdersAdmin, // Đổi tên này cho đúng với export
+  getOrdersAdmin, 
   getOrderById,
   updateOrderStatus,
   deleteOrder,
@@ -23,6 +23,22 @@ import {
   updateProduct,
   deleteProduct
 } from "../controllers/products.controller.js";
+
+import {
+  getAllCategories,
+  getCategoryById,
+  createCategory,
+  updateCategory,
+  deleteCategory
+} from "../controllers/categories.controller.js";
+
+import { 
+  getAllEmployees, 
+  getEmployeeById, 
+  createEmployee, 
+  updateEmployee, 
+  deleteEmployee 
+} from "../controllers/employees.controller.js";
 
 r.use(requireAuth, requireAdmin);
 
@@ -45,5 +61,19 @@ r.get("/orders", getOrdersAdmin); // Đổi tên handler cho đúng
 r.get("/orders/:id", getOrderById);
 r.put("/orders/:id", updateOrderStatus);
 r.delete("/orders/:id", deleteOrder);
+
+// Quản lý danh mục
+r.get("/categories", getAllCategories);
+r.get("/categories/:id", getCategoryById);
+r.post("/categories", createCategory);
+r.put("/categories/:id", updateCategory);
+r.delete("/categories/:id", deleteCategory);
+
+// Quản lý nhân viên
+r.get("/employees", getAllEmployees);
+r.get("/employees/:id", getEmployeeById);
+r.post("/employees", createEmployee);
+r.put("/employees/:id", updateEmployee);
+r.delete("/employees/:id", deleteEmployee)
 
 export default r;
