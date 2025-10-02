@@ -1,8 +1,9 @@
 import { Router } from "express";
 const r = Router();
 
-import { requireAuth, requireAdmin } from "../middlewares/authMiddleware.js";
+import { requireAuth, requireAdmin, authorizeRoles } from "../middlewares/authMiddleware.js";
 import { getStats } from "../controllers/stats.controller.js";
+
 import {
   getAllCustomers,
   getCustomerById,
@@ -40,6 +41,13 @@ import {
   deleteEmployee 
 } from "../controllers/employees.controller.js";
 
+import {
+  getAllPromotions,
+  createPromotion,
+  updatePromotion,
+  deletePromotion,
+} from "../controllers/promotions.controller.js";
+
 r.use(requireAuth, requireAdmin);
 
 // Quản lý khách hàng
@@ -75,5 +83,14 @@ r.get("/employees/:id", getEmployeeById);
 r.post("/employees", createEmployee);
 r.put("/employees/:id", updateEmployee);
 r.delete("/employees/:id", deleteEmployee)
+
+// Quản lý khuyến mãi
+r.get("/promotions", getAllPromotions);
+r.post("/promotions", requireAuth, authorizeRoles("admin"), createPromotion);
+r.put("/promotions/:id", requireAuth, authorizeRoles("admin"), updatePromotion);
+r.delete("/promotions/:id", requireAuth, authorizeRoles("admin"), deletePromotion);
+
+
+
 
 export default r;
