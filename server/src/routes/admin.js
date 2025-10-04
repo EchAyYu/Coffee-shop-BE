@@ -2,7 +2,6 @@ import { Router } from "express";
 const r = Router();
 
 import { requireAuth, requireAdmin, authorizeRoles } from "../middlewares/authMiddleware.js";
-import { getStats } from "../controllers/stats.controller.js";
 
 import {
   getAllCustomers,
@@ -24,7 +23,6 @@ import {
   updateProduct,
   deleteProduct
 } from "../controllers/products.controller.js";
-
 import {
   getAllCategories,
   getCategoryById,
@@ -32,7 +30,6 @@ import {
   updateCategory,
   deleteCategory
 } from "../controllers/categories.controller.js";
-
 import { 
   getAllEmployees, 
   getEmployeeById, 
@@ -40,14 +37,19 @@ import {
   updateEmployee, 
   deleteEmployee 
 } from "../controllers/employees.controller.js";
-
 import {
   getAllPromotions,
   createPromotion,
   updatePromotion,
   deletePromotion,
 } from "../controllers/promotions.controller.js";
+import {
+  getAllReservations,
+  updateReservationStatus,
+  deleteReservation,
+} from "../controllers/reservations.controller.js";
 
+// Middleware: chỉ admin mới vào được
 r.use(requireAuth, requireAdmin);
 
 // Quản lý khách hàng
@@ -65,7 +67,7 @@ r.put("/products/:id", updateProduct);
 r.delete("/products/:id", deleteProduct);
 
 // Quản lý đơn hàng
-r.get("/orders", getOrdersAdmin); // Đổi tên handler cho đúng
+r.get("/orders", getOrdersAdmin);
 r.get("/orders/:id", getOrderById);
 r.put("/orders/:id", updateOrderStatus);
 r.delete("/orders/:id", deleteOrder);
@@ -82,15 +84,17 @@ r.get("/employees", getAllEmployees);
 r.get("/employees/:id", getEmployeeById);
 r.post("/employees", createEmployee);
 r.put("/employees/:id", updateEmployee);
-r.delete("/employees/:id", deleteEmployee)
+r.delete("/employees/:id", deleteEmployee);
 
 // Quản lý khuyến mãi
 r.get("/promotions", getAllPromotions);
-r.post("/promotions", requireAuth, authorizeRoles("admin"), createPromotion);
-r.put("/promotions/:id", requireAuth, authorizeRoles("admin"), updatePromotion);
-r.delete("/promotions/:id", requireAuth, authorizeRoles("admin"), deletePromotion);
+r.post("/promotions", createPromotion);
+r.put("/promotions/:id", updatePromotion);
+r.delete("/promotions/:id", deletePromotion);
 
-
-
+// Quản lý đặt bàn (chỉ admin)
+r.get("/reservations", getAllReservations);
+r.put("/reservations/:id", updateReservationStatus);
+r.delete("/reservations/:id", deleteReservation);
 
 export default r;
