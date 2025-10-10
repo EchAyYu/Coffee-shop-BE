@@ -1,4 +1,5 @@
-import { Router } from "express";
+import express from "express";
+import { body, param } from "express-validator";
 import {
   createReservation,
   getMyReservations,
@@ -7,24 +8,136 @@ import {
   deleteReservation,
 } from "../controllers/reservations.controller.js";
 import { requireAuth, authorizeRoles } from "../middlewares/authMiddleware.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
-const r = Router();
+const router = express.Router();
 
-// ==================== CUSTOMER ====================
-// Tạo đặt bàn (customer)
-r.post("/", requireAuth, authorizeRoles("customer"), createReservation);
+/**
+ * @swagger
+ * tags:
+ *   name: Reservations
+ *   description: API quản lý đặt bàn
+ */
 
-// Xem lịch sử đặt bàn của chính mình
-r.get("/my", requireAuth, authorizeRoles("customer"), getMyReservations);
+/**
+ * @swagger
+ * /api/reservations:
+ *   post:
+ *     summary: Tạo đặt bàn (customer)
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               date:
+ *                 type: string
+ *                 example: "2025-10-10"
+ *               time:
+ *                 type: string
+ *                 example: "18:30"
+ *               numberOfPeople:
+ *                 type: integer
+ *                 example: 4
+ */
+router.post(
+  "/",
+  requireAuth,
+  authorizeRoles("customer"),
+  [
+    body("date").notEmpty().withMessage("Thiếu ngày đặt bàn"),
+    body("time").notEmpty().withMessage("Thiếu giờ đặt bàn"),
+    body("numberOfPeople")
+      .isInt({ min: 1 })
+      .withMessage("Số lượng người phải hợp lệ"),
+  ],
+  asyncHandler(createReservation)
+);
 
-// ==================== ADMIN ====================
-// Xem toàn bộ đặt bàn
-r.get("/", requireAuth, authorizeRoles("admin"), getAllReservations);
+/**
+ * @swagger
+ * /api/reservations/my:
+ *   get:
+ *     summary: Xem danh sách đặt bàn của chính mình
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get(
+  "/my",
+  requireAuth,
+  authorizeRoles("customer"),
+  asyncHandler(getMyReservations)
+);
 
-// Cập nhật trạng thái (CONFIRMED, CANCELLED, DONE…)
-r.put("/:id", requireAuth, authorizeRoles("admin"), updateReservationStatus);
+/**
+ * @swagger
+ * /api/reservations:
+ *   get:
+ *     summary: Xem tất cả đặt bàn (admin)
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get(
+  "/",
+  requireAuth,
+  authorizeRoles("admin"),
+  asyncHandler(getAllReservations)
+);
 
-// Xóa đặt bàn
-r.delete("/:id", requireAuth, authorizeRoles("admin"), deleteReservation);
+/**
+ * @swagger
+ * /api/reservations/{id}:
+ *   put:
+ *     summary: Cập nhật trạng thái đặt bàn (admin)
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [CONFIRMED, CANCELLED, DONE]
+ *                 example: CONFIRMED
+ */
+router.put(
+  "/:id",
+  requireAuth,
+  authorizeRoles("admin"),
+  [
+    param("id").isInt().toInt(),
+    body("status")
+      .isIn(["CONFIRMED", "CANCELLED", "DONE"])
+      .withMessage("Trạng thái không hợp lệ"),
+  ],
+  asyncHandler(updateReservationStatus)
+);
 
-export default r;
+/**
+ * @swagger
+ * /api/reservations/{id}:
+ *   delete:
+ *     summary: Xóa đặt bàn (admin)
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.delete(
+  "/:id",
+  requireAuth,
+  authorizeRoles("admin"),
+  [param("id").isInt().toInt()],
+  asyncHandler(deleteReservation)
+);
+
+export default router;

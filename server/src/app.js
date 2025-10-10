@@ -1,57 +1,114 @@
+// ===============================
+// ☕ Coffee Shop Backend - App.js
+// ===============================
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-
+import morgan from "morgan";
 import dotenv from "dotenv";
 dotenv.config();
 
+// --- Config & Utils ---
+import { config } from "./config/config.js";
+import sequelize from "./utils/db.js";
+import { notFound, errorHandler } from "./middlewares/errorHandler.js";
+import { swaggerDocs } from "./config/swagger.js";
+
+// --- Middleware bảo vệ ---
+import { requireAuth, requireAdmin } from "./middlewares/authMiddleware.js";
+import { globalLimiter } from "./middlewares/rateLimit.js";
+
+// --- Routers ---
+import authRouter from "./routes/auth.js";
 import productsRouter from "./routes/products.js";
 import ordersRouter from "./routes/orders.js";
 import reservationsRouter from "./routes/reservations.js";
-import authRouter from "./routes/auth.js";
+import categoriesRouter from "./routes/categories.js";
 import customersRouter from "./routes/customers.js";
 import employeesRouter from "./routes/employees.js";
 import promotionsRouter from "./routes/promotions.js";
 import reviewsRouter from "./routes/reviews.js";
-import categoriesRouter from "./routes/categories.js";
 import adminRouter from "./routes/admin.js";
-import { errorHandler } from "./middlewares/errorHandler.js";
 
-import sequelize from "./utils/db.js";
-import { requireAuth, requireAdmin } from "./middlewares/authMiddleware.js";
-
+// --- Khởi tạo Express ---
 const app = express();
 
-app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
+// ===============================
+// 🧩 GLOBAL MIDDLEWARES
+// ===============================
+
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: false, // Cho phép ảnh từ Cloudinary
+}));
+
+// Logger (chỉ hiện log khi dev)
+if (config.env === "development") {
+  app.use(morgan("dev"));
+}
+
+// CORS cho frontend (5173 hoặc 3000)
+app.use(cors({
+  origin: config.corsOrigin || config.clientUrl,
+  credentials: true,
+}));
+
+// Giới hạn JSON body
 app.use(express.json({ limit: "1mb" }));
 
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
-app.use("/api/", limiter);
+app.use("/api/", globalLimiter);
 
+// ===============================
+// 🚀 ROUTES
+// ===============================
+
+// Tài khoản & xác thực
 app.use("/api/auth", authRouter);
+
+// Public routes
 app.use("/api/products", productsRouter);
+app.use("/api/categories", categoriesRouter);
+app.use("/api/reviews", reviewsRouter);
+
+// Private user routes
 app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
-app.use("/api/categories", categoriesRouter);
 app.use("/api/customers", customersRouter);
+
+// Employee / Admin routes
 app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
-app.use("/api/reviews", reviewsRouter);
-app.use(errorHandler);
 
-
-// BẢO VỆ ADMIN
+// Dashboard quản trị (bảo vệ bằng JWT)
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
 
-// Health
+// Health check
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-const PORT = process.env.PORT || 4000;
+// Swagger API docs (http://localhost:4000/api-docs)
+swaggerDocs(app);
+
+// ===============================
+// 🧱 ERROR HANDLERS
+// ===============================
+app.use(notFound);
+app.use(errorHandler);  
+
+
+// ===============================
+// 🔌 DATABASE CONNECTION
+// ===============================
+const PORT = config.port || 4000;
+
 sequelize.authenticate()
   .then(() => {
-    console.log("✅ Connected to MySQL");
-    app.listen(PORT, () => console.log("☕ Backend on http://localhost:" + PORT));
+    console.log("✅ Connected to MySQL successfully!");
+    app.listen(PORT, () => {
+      console.log(`☕ Server is running on http://localhost:${PORT}`);
+    });
   })
-  .catch(err => console.error("❌ DB connect error:", err));
+  .catch((err) => {
+    console.error("❌ Database connection error:", err);
+  });

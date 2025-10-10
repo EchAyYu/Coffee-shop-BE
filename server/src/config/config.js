@@ -4,7 +4,8 @@ dotenv.config();
 export const config = {
   port: process.env.PORT || 4000,
   env: process.env.NODE_ENV || "development",
-  clientUrl: process.env.CLIENT_URL || "http://localhost:3000",
+  clientUrl: process.env.CLIENT_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+  corsOrigin: process.env.CORS_ORIGIN || process.env.CLIENT_URL,
   db: {
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -15,7 +16,7 @@ export const config = {
   },
   jwt: {
     secret: process.env.JWT_SECRET,
-    expiresIn: process.env.JWT_EXPIRES_IN || "15m",
+    expiresIn: process.env.JWT_EXPIRES_IN || "1d",
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
   },
@@ -25,3 +26,4 @@ export const config = {
     secret: process.env.CLOUDINARY_API_SECRET,
   },
 };
+
