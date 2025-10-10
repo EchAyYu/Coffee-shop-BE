@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -15,6 +16,7 @@ import promotionsRouter from "./routes/promotions.js";
 import reviewsRouter from "./routes/reviews.js";
 import categoriesRouter from "./routes/categories.js";
 import adminRouter from "./routes/admin.js";
+import { errorHandler } from "./middlewares/errorHandler.js";
 
 import sequelize from "./utils/db.js";
 import { requireAuth, requireAdmin } from "./middlewares/authMiddleware.js";
@@ -37,6 +39,8 @@ app.use("/api/customers", customersRouter);
 app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 app.use("/api/reviews", reviewsRouter);
+app.use(errorHandler);
+
 
 // BẢO VỆ ADMIN
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);

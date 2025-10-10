@@ -3,7 +3,7 @@ import sequelize from "../utils/db.js";
 import Customer from "./Customer.js";
 
 const Reservation = sequelize.define("Reservation", {
-  id_res: {
+  id_datban: {
     type: DataTypes.INTEGER,
     autoIncrement: true,
     primaryKey: true,
@@ -12,13 +12,27 @@ const Reservation = sequelize.define("Reservation", {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
-  ho_ten: DataTypes.STRING(100),
-  sdt: DataTypes.STRING(20),
-  ngay_dat: DataTypes.DATE,
-  so_nguoi: DataTypes.INTEGER,
-  ghi_chu: DataTypes.STRING(200),
-  status: {
-    type: DataTypes.ENUM("PENDING", "CONFIRMED", "CANCELLED"),
+  ho_ten: {
+    type: DataTypes.STRING(100),
+    allowNull: false,
+  },
+  sdt: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+  },
+  ngay_dat: {
+    type: DataTypes.DATE,
+    allowNull: false,
+  },
+  so_nguoi: {
+    type: DataTypes.INTEGER,
+    defaultValue: 2,
+  },
+  ghi_chu: {
+    type: DataTypes.STRING(255),
+  },
+  trang_thai: {
+    type: DataTypes.ENUM("PENDING", "CONFIRMED", "CANCELLED", "DONE"),
     defaultValue: "PENDING",
   },
 }, {
