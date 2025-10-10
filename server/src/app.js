@@ -116,3 +116,8 @@ sequelize.authenticate()
   .catch((err) => {
     console.error("❌ Database connection error:", err);
   });
+
+  app.use(cors({
+  origin: "http://localhost:5173", // FE chạy ở port 5173 (Vite)
+  credentials: true,
+}));
