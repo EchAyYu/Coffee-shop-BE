@@ -1,28 +1,17 @@
 // src/models/index.js
+import sequelize from "../utils/db.js"; // ✅ Dùng lại instance có sẵn
 import { Sequelize } from "sequelize";
-import { config } from "../config/config.js";
 
-// 🔌 Khởi tạo Sequelize
-const sequelize = new Sequelize(
-  config.db.name,
-  config.db.user,
-  config.db.pass,
-  {
-    host: config.db.host,
-    dialect: config.db.dialect,
-    logging: false,
-  }
-);
-
-// 🧩 Import models đã khai báo với sequelize riêng
+// 🧩 Import models (tất cả đều dùng chung sequelize từ utils/db.js)
 import Category from "./Category.js";
 import Product from "./Product.js";
 import Order from "./Order.js";
 import Reservation from "./Reservation.js";
 import Customer from "./Customer.js";
 import Account from "./Account.js";
+import Review from "./Review.js";
 
-// 🔗 Thiết lập quan hệ giữa các bảng (nếu có)
+// 🔗 Thiết lập quan hệ giữa các bảng (chung một sequelize)
 Category.hasMany(Product, { foreignKey: "id_dm" });
 Product.belongsTo(Category, { foreignKey: "id_dm" });
 
@@ -35,6 +24,13 @@ Order.belongsTo(Customer, { foreignKey: "id_kh" });
 Customer.hasMany(Reservation, { foreignKey: "id_kh" });
 Reservation.belongsTo(Customer, { foreignKey: "id_kh" });
 
+// 🔗 Liên kết đánh giá (review)
+Customer.hasMany(Review, { foreignKey: "id_kh" });
+Review.belongsTo(Customer, { foreignKey: "id_kh" });
+
+Product.hasMany(Review, { foreignKey: "id_mon" });
+Review.belongsTo(Product, { foreignKey: "id_mon" });
+
 // ✅ Export Sequelize instance và models
 const db = {
   sequelize,
@@ -45,6 +41,7 @@ const db = {
   Reservation,
   Customer,
   Account,
+  Review,
 };
 
 export default db;

@@ -31,6 +31,8 @@ import employeesRouter from "./routes/employees.js";
 import promotionsRouter from "./routes/promotions.js";
 import reviewsRouter from "./routes/reviews.js";
 import adminRouter from "./routes/admin.js";
+import statsRouter from "./routes/stats.js";
+
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -71,6 +73,8 @@ app.use("/api/auth", authRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/reviews", reviewsRouter);
+app.use("/api/stats", statsRouter);
+
 
 // Private user routes
 app.use("/api/orders", ordersRouter);

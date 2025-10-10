@@ -1,30 +1,71 @@
-import Order from "../models/Order.js";
+// src/controllers/stats.controller.js
+import db from "../models/index.js";
+const { Order, Customer, Product, Reservation } = db;
 import { Op, fn, col } from "sequelize";
 
 export async function getStats(req, res) {
   try {
-    const { from, to, by = "day" } = req.query;
+    // Tổng số khách hàng
+    const totalCustomers = await Customer.count();
 
-    const where = {};
-    if (from || to) {
-      where.ngay_dat = {
-        ...(from ? { [Op.gte]: new Date(from) } : {}),
-        ...(to ? { [Op.lte]: new Date(to) } : {})
-      };
-    }
+    // Tổng số sản phẩm
+    const totalProducts = await Product.count();
 
-    const stats = await Order.findAll({
-      attributes: [
-        [fn("DATE", col("ngay_dat")), "date"],
-        [fn("COUNT", col("id_don")), "total_orders"]
-      ],
-      where,
-      group: [fn("DATE", col("ngay_dat"))],
-      order: [[fn("DATE", col("ngay_dat")), "ASC"]]
+    // Tổng số đơn hàng
+    const totalOrders = await Order.count();
+
+    // Tổng số đặt bàn
+    const totalReservations = await Reservation.count();
+
+    // Tổng doanh thu
+    const totalRevenueResult = await Order.findAll({
+      attributes: [[fn("SUM", col("tong_tien")), "totalRevenue"]],
+      raw: true,
     });
+    const totalRevenue = totalRevenueResult[0].totalRevenue || 0;
 
-    res.json(stats);
+    // Doanh thu hôm nay
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    const todayRevenueResult = await Order.findAll({
+      attributes: [[fn("SUM", col("tong_tien")), "todayRevenue"]],
+      where: {
+        ngay_dat: {
+          [Op.gte]: today,
+          [Op.lt]: tomorrow,
+        },
+      },
+      raw: true,
+    });
+    const todayRevenue = todayRevenueResult[0].todayRevenue || 0;
+
+    const totalReviews = await db.Review.count();
+
+    // Điểm đánh giá trung bình (nếu có đánh giá)
+    const avgRatingResult = await db.Review.findAll({
+      attributes: [[fn("AVG", col("diem")), "avgRating"]],
+      raw: true,
+    });
+    const avgRating = Number(avgRatingResult[0].avgRating || 0).toFixed(2);
+
+    res.json({
+      success: true,
+      data: {
+        totalCustomers,
+        totalProducts,
+        totalOrders,
+        totalReservations,
+        totalRevenue,
+        todayRevenue,
+        totalReviews,
+        avgRating,
+      },
+    });
   } catch (err) {
-    res.status(500).json({ message: "Lỗi thống kê", error: err.message });
+    console.error("❌ [getStats] error:", err);
+    res.status(500).json({ success: false, message: "Lỗi server khi thống kê" });
   }
 }
