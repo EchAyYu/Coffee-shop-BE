@@ -17,6 +17,7 @@ const Category = sequelize.define("Category", {
 }, {
   tableName: "danh_muc",
   timestamps: false,
+  freezeTableName: true,
 });
 
 export default Category;

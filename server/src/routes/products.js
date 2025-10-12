@@ -1,3 +1,4 @@
+// src/routes/products.js
 import express from "express";
 import { body, param, query } from "express-validator";
 import { requireAuth, authorizeRoles } from "../middlewares/authMiddleware.js";
@@ -22,25 +23,13 @@ const router = express.Router();
  *   get:
  *     summary: Lấy danh sách sản phẩm (public, có tìm kiếm & phân trang)
  *     tags: [Products]
- *     parameters:
- *       - in: query
- *         name: q
- *         schema: { type: string }
- *         description: Từ khoá tìm theo tên
- *       - in: query
- *         name: page
- *         schema: { type: integer, default: 1 }
- *       - in: query
- *         name: limit
- *         schema: { type: integer, default: 12, minimum: 1, maximum: 100 }
- *     responses:
- *       200: { description: OK }
  */
 router.get(
   "/",
   [
     query("page").optional().isInt({ min: 1 }).toInt(),
     query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("q").optional().isString(),
   ],
   validate,
   asyncHandler(async (req, res) => {
@@ -49,17 +38,15 @@ router.get(
     const limit = req.query.limit || 12;
     const offset = (page - 1) * limit;
 
-    const where = q
-      ? {
-          name: { [Op.like]: `%${q}%` },
-        }
-      : {};
+    // ✅ Dùng đúng tên cột trong DB: ten_mon
+    const where = q ? { ten_mon: { [Op.like]: `%${q}%` } } : {};
 
     const { rows, count } = await Product.findAndCountAll({
       where,
       offset,
       limit,
-      order: [["createdAt", "DESC"]],
+      // ✅ KHÔNG dùng createdAt vì bảng không có; dùng id_mon để sort mới nhất
+      order: [["id_mon", "DESC"]],
     });
 
     res.json({
@@ -88,7 +75,10 @@ router.get(
   validate,
   asyncHandler(async (req, res) => {
     const prod = await Product.findByPk(req.params.id);
-    if (!prod) return res.status(404).json({ success: false, message: "Không tìm thấy sản phẩm" });
+    if (!prod)
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy sản phẩm" });
     res.json({ success: true, data: prod });
   })
 );
@@ -100,30 +90,19 @@ router.get(
  *     summary: Thêm sản phẩm mới (chỉ admin)
  *     tags: [Products]
  *     security: [ { bearerAuth: [] } ]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [name, price, categoryId]
- *             properties:
- *               name:        { type: string }
- *               price:       { type: number }
- *               description: { type: string }
- *               categoryId:  { type: integer }
- *               imageUrl:    { type: string }
  */
 router.post(
   "/",
   requireAuth,
   authorizeRoles("admin"),
   [
-    body("name").notEmpty().withMessage("Tên sản phẩm là bắt buộc"),
-    body("price").isFloat({ min: 0 }).withMessage("Giá phải lớn hơn 0"),
-    body("description").optional().isString(),
-    body("categoryId").isInt().withMessage("Danh mục không hợp lệ"),
-    body("imageUrl").optional().isString(),
+    // ✅ Map đúng schema bảng "mon"
+    body("ten_mon").notEmpty().withMessage("Tên sản phẩm là bắt buộc"),
+    body("gia").isFloat({ min: 0 }).withMessage("Giá phải lớn hơn 0"),
+    body("id_dm").isInt().withMessage("Danh mục không hợp lệ"),
+    body("mo_ta").optional().isString(),
+    body("anh").optional().isString(),
+    body("trang_thai").optional().isBoolean(),
   ],
   validate,
   asyncHandler(async (req, res) => {
@@ -146,16 +125,20 @@ router.put(
   authorizeRoles("admin"),
   [
     param("id").isInt().toInt(),
-    body("name").optional().isString().notEmpty(),
-    body("price").optional().isFloat({ min: 0 }),
-    body("description").optional().isString(),
-    body("categoryId").optional().isInt().toInt(),
-    body("imageUrl").optional().isString(),
+    body("ten_mon").optional().isString().notEmpty(),
+    body("gia").optional().isFloat({ min: 0 }),
+    body("id_dm").optional().isInt().toInt(),
+    body("mo_ta").optional().isString(),
+    body("anh").optional().isString(),
+    body("trang_thai").optional().isBoolean(),
   ],
   validate,
   asyncHandler(async (req, res) => {
     const prod = await Product.findByPk(req.params.id);
-    if (!prod) return res.status(404).json({ success: false, message: "Không tìm thấy sản phẩm" });
+    if (!prod)
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy sản phẩm" });
     await prod.update(req.body);
     res.json({ success: true, data: prod });
   })
@@ -177,7 +160,10 @@ router.delete(
   validate,
   asyncHandler(async (req, res) => {
     const prod = await Product.findByPk(req.params.id);
-    if (!prod) return res.status(404).json({ success: false, message: "Không tìm thấy sản phẩm" });
+    if (!prod)
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy sản phẩm" });
     await prod.destroy();
     res.json({ success: true, message: "Đã xóa sản phẩm" });
   })

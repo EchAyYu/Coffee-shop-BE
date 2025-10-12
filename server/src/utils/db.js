@@ -9,7 +9,11 @@ const sequelize = new Sequelize(
   {
     host: process.env.DB_HOST,
     dialect: process.env.DB_DIALECT || "mysql",
-    logging: false,
+    logging: process.env.NODE_ENV === "development" ? console.log : false,
+    define: {
+      freezeTableName: true,
+      timestamps: false, // bảng VN thường không có createdAt/updatedAt
+    },
   }
 );
 

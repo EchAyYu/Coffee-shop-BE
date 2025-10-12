@@ -32,6 +32,7 @@ const Product = sequelize.define("Product", {
 }, {
   tableName: "mon",
   timestamps: false,
+  freezeTableName: true,
 });
 
 export default Product;

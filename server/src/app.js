@@ -62,13 +62,12 @@ const ALLOW_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:3000",
-].filter(Boolean); // loại giá trị null/undefined
+].filter(Boolean);
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Cho phép tools như Postman (origin = undefined)
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true); // Postman, Swagger (no origin)
       if (ALLOW_ORIGINS.includes(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS"));
     },
@@ -112,7 +111,7 @@ app.use("/api/promotions", promotionsRouter);
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
 
 // Health check
-app.get("/api/health", (req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 // Swagger API docs (vd: http://localhost:4000/api-docs)
 swaggerDocs(app);
