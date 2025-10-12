@@ -5,9 +5,9 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import morgan from "morgan";
 import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
 dotenv.config();
 
 // --- Config & Utils ---
@@ -33,40 +33,64 @@ import reviewsRouter from "./routes/reviews.js";
 import adminRouter from "./routes/admin.js";
 import statsRouter from "./routes/stats.js";
 
-
 // --- Khởi tạo Express ---
 const app = express();
+
+// Cho reverse proxy (Nginx/Render/Heroku) hiểu IP thật của client
+app.set("trust proxy", 1);
 
 // ===============================
 // 🧩 GLOBAL MIDDLEWARES
 // ===============================
 
-// Security headers
-app.use(helmet({
-  crossOriginResourcePolicy: false, // Cho phép ảnh từ Cloudinary
-}));
+// Bảo mật header
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false, // Cho phép ảnh (Cloudinary,...)
+  })
+);
 
-// Logger (chỉ hiện log khi dev)
+// Logger khi dev
 if (config.env === "development") {
   app.use(morgan("dev"));
 }
 
-// CORS cho frontend (5173 hoặc 3000)
-app.use(cors({
-  origin: config.corsOrigin || config.clientUrl,
-  credentials: true,
-}));
+// CORS cho frontend (đa nguồn) + credentials (cookie refresh)
+const ALLOW_ORIGINS = [
+  config.corsOrigin,
+  config.clientUrl,
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:3000",
+].filter(Boolean); // loại giá trị null/undefined
 
-// Giới hạn JSON body
-app.use(express.json({ limit: "1mb" }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Cho phép tools như Postman (origin = undefined)
+      if (!origin) return callback(null, true);
+      if (ALLOW_ORIGINS.includes(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 
+// Body parsers
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
+
+// Cookie parser (để đọc refresh_token httpOnly)
+app.use(cookieParser());
+
+// Rate limit toàn cục cho /api
 app.use("/api/", globalLimiter);
 
 // ===============================
 // 🚀 ROUTES
 // ===============================
 
-// Tài khoản & xác thực
+// Auth
 app.use("/api/auth", authRouter);
 
 // Public routes
@@ -74,7 +98,6 @@ app.use("/api/products", productsRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/reviews", reviewsRouter);
 app.use("/api/stats", statsRouter);
-
 
 // Private user routes
 app.use("/api/orders", ordersRouter);
@@ -85,28 +108,28 @@ app.use("/api/customers", customersRouter);
 app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 
-// Dashboard quản trị (bảo vệ bằng JWT)
+// Dashboard quản trị (yêu cầu JWT + ADMIN)
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
 
 // Health check
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// Swagger API docs (http://localhost:4000/api-docs)
+// Swagger API docs (vd: http://localhost:4000/api-docs)
 swaggerDocs(app);
 
 // ===============================
 // 🧱 ERROR HANDLERS
 // ===============================
 app.use(notFound);
-app.use(errorHandler);  
-
+app.use(errorHandler);
 
 // ===============================
-// 🔌 DATABASE CONNECTION
+// 🔌 DATABASE & SERVER
 // ===============================
 const PORT = config.port || 4000;
 
-sequelize.authenticate()
+sequelize
+  .authenticate()
   .then(() => {
     console.log("✅ Connected to MySQL successfully!");
     app.listen(PORT, () => {
@@ -117,7 +140,4 @@ sequelize.authenticate()
     console.error("❌ Database connection error:", err);
   });
 
-  app.use(cors({
-  origin: "http://localhost:5173", // FE chạy ở port 5173 (Vite)
-  credentials: true,
-}));
+export default app;
