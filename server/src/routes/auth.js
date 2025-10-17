@@ -1,3 +1,6 @@
+// ===============================
+// ☕ Coffee Shop Backend - Auth Routes
+// ===============================
 import { Router } from "express";
 import { body } from "express-validator";
 import {
@@ -12,6 +15,7 @@ import { requireAuth } from "../middlewares/authMiddleware.js";
 
 const router = Router();
 
+// Đăng ký
 router.post(
   "/register",
   [
@@ -22,6 +26,7 @@ router.post(
   register
 );
 
+// Đăng nhập
 router.post(
   "/login",
   [
@@ -31,12 +36,16 @@ router.post(
   login
 );
 
-// Refresh: BE đọc refresh_token từ cookie httpOnly
+// Refresh: đọc refresh_token từ cookie httpOnly
 router.post("/refresh", refreshToken);
 
+// Logout
 router.post("/logout", requireAuth, logout);
+
+// Lấy thông tin người dùng hiện tại
 router.get("/me", requireAuth, me);
 
+// Đổi mật khẩu
 router.put(
   "/change-password",
   requireAuth,

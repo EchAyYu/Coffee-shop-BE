@@ -36,7 +36,7 @@ import statsRouter from "./routes/stats.js";
 // --- Khởi tạo Express ---
 const app = express();
 
-// Cho reverse proxy (Nginx/Render/Heroku) hiểu IP thật của client
+// Cho reverse proxy (Render, Vercel, Heroku...) hiểu IP thật của client
 app.set("trust proxy", 1);
 
 // ===============================
@@ -55,7 +55,9 @@ if (config.env === "development") {
   app.use(morgan("dev"));
 }
 
-// CORS cho frontend (đa nguồn) + credentials (cookie refresh)
+// ===============================
+// 🌐 CORS + COOKIE CONFIG
+// ===============================
 const ALLOW_ORIGINS = [
   config.corsOrigin,
   config.clientUrl,
@@ -64,25 +66,29 @@ const ALLOW_ORIGINS = [
   "http://localhost:3000",
 ].filter(Boolean);
 
+// ✅ Cho phép FE gửi cookie & header Authorization
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true); // Postman, Swagger (no origin)
+      if (!origin) return callback(null, true); // Cho phép Postman, Swagger
       if (ALLOW_ORIGINS.includes(origin)) return callback(null, true);
+      console.warn("❌ Blocked by CORS:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
-    credentials: true,
+    credentials: true, // BẮT BUỘC để gửi cookie giữa FE <-> BE
   })
 );
 
-// Body parsers
+// ===============================
+// 📦 BODY PARSERS & COOKIES
+// ===============================
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
-
-// Cookie parser (để đọc refresh_token httpOnly)
 app.use(cookieParser());
 
-// Rate limit toàn cục cho /api
+// ===============================
+// 🚦 RATE LIMIT
+// ===============================
 app.use("/api/", globalLimiter);
 
 // ===============================
@@ -107,13 +113,13 @@ app.use("/api/customers", customersRouter);
 app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 
-// Dashboard quản trị (yêu cầu JWT + ADMIN)
+// Dashboard quản trị (JWT + ADMIN)
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
 
 // Health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// Swagger API docs (vd: http://localhost:4000/api-docs)
+// Swagger API docs
 swaggerDocs(app);
 
 // ===============================
@@ -123,20 +129,24 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ===============================
-// 🔌 DATABASE & SERVER
+// 🔌 START SERVER FUNCTION
 // ===============================
-const PORT = config.port || 4000;
+export const startServer = async () => {
+  const PORT = config.port || 4000;
 
-sequelize
-  .authenticate()
-  .then(() => {
+  try {
+    await sequelize.authenticate();
     console.log("✅ Connected to MySQL successfully!");
+
     app.listen(PORT, () => {
       console.log(`☕ Server is running on http://localhost:${PORT}`);
+      console.log(`🌐 Allowed Origins: ${ALLOW_ORIGINS.join(", ")}`);
     });
-  })
-  .catch((err) => {
+  } catch (err) {
     console.error("❌ Database connection error:", err);
-  });
+  }
+};
+
 
 export default app;
+startServer();
