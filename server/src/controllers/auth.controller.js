@@ -2,7 +2,7 @@
 // ☕ Coffee Shop Backend - Auth Controller (Hoàn chỉnh)
 // ===============================
 
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import { validationResult } from "express-validator";
@@ -159,21 +159,38 @@ export async function refreshToken(req, res) {
 // ===============================
 export async function me(req, res) {
   try {
-    const account = await Account.findByPk(req.user.id_tk, {
-      attributes: ["id_tk", "ten_dn", "role", "email"],
-      include: {
-        model: Customer,
-        attributes: ["id_kh", "ho_ten", "email", "sdt", "dia_chi", "anh", "diem"],
+    console.log("📥 req.user:", req.user);
+
+    const account = await Account.findByPk(req.user.id_tk || req.user.id, {
+      attributes: ["id_tk", "ten_dn", "role"],
+    });
+
+    if (!account) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy tài khoản" });
+    }
+
+    if (account.role === "admin" || account.role === "employee") {
+      return res.json({ success: true, data: account });
+    }
+
+    const customer = await Customer.findOne({
+      where: { id_tk: req.user.id_tk || req.user.id },
+      attributes: ["id_kh", "ho_ten", "email", "sdt", "dia_chi", "anh", "diem"],
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        ...account.toJSON(),
+        customer: customer || null,
       },
     });
-    if (!account) return res.status(404).json({ success: false, message: "Không tìm thấy tài khoản" });
-
-    return res.json({ success: true, data: account });
   } catch (err) {
-    console.error("❌ me error:", err);
-    return res.status(500).json({ success: false, message: "Lỗi server" });
+    console.error("❌ Lỗi /auth/me:", err);
+    res.status(500).json({ success: false, message: "Lỗi server khi lấy thông tin tài khoản" });
   }
 }
+
 
 // ===============================
 // 🔹 Đổi mật khẩu
