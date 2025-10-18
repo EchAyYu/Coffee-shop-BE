@@ -6,6 +6,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
 import db from "../models/index.js";
 import { Op } from "sequelize";
+import { getOrdersAdmin } from "../controllers/orders.controller.js";
 
 const { Product, Order, Customer } = db;
 const router = express.Router();
@@ -162,5 +163,6 @@ router.delete(
     res.json({ success: true, message: "Đã xoá đơn hàng" });
   })
 );
+
 
 export default router;

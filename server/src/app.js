@@ -32,6 +32,7 @@ import promotionsRouter from "./routes/promotions.js";
 import reviewsRouter from "./routes/reviews.js";
 import adminRouter from "./routes/admin.js";
 import statsRouter from "./routes/stats.js";
+import adminOrdersRoute from "./routes/adminOrders.route.js";
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -112,6 +113,7 @@ app.use("/api/customers", customersRouter);
 // Employee / Admin routes
 app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
+app.use("/api/admin/orders", adminOrdersRoute);
 
 // Dashboard quản trị (JWT + ADMIN)
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
