@@ -60,78 +60,86 @@ export async function getOrdersAdmin(req, res) {
 }
 
 // PUT /api/orders/:id/status  (admin/employee)
+// ✅ PUT /api/orders/:id/status (admin/employee)
 export async function updateOrderStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { trang_thai } = req.body;
 
-    if (!ALLOWED_STATUS.includes(status)) {
+    if (!trang_thai || !ALLOWED_STATUS.includes(trang_thai.toUpperCase())) {
       return res.status(400).json({ message: "Trạng thái không hợp lệ" });
     }
 
     const ord = await Order.findByPk(id);
     if (!ord) return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
 
-    // Quy tắc chuyển trạng thái (tuỳ ý, có thể nới lỏng)
-    // PENDING -> CONFIRMED/PAID/CANCELLED
-    // CONFIRMED -> PAID/SHIPPED/CANCELLED
-    // PAID -> SHIPPED/DONE
-    // SHIPPED -> DONE
-    // DONE -> (final)
-    // CANCELLED -> (final)
-    const current = ord.trang_thai || "PENDING";
+    const current = ord.trang_thai?.toUpperCase() || "PENDING";
     const allowedNext = {
-      PENDING:   ["CONFIRMED", "PAID", "CANCELLED"],
+      PENDING: ["CONFIRMED", "PAID", "CANCELLED"],
       CONFIRMED: ["PAID", "SHIPPED", "CANCELLED"],
-      PAID:      ["SHIPPED", "DONE"],
-      SHIPPED:   ["DONE"],
-      DONE:      [],
+      PAID: ["SHIPPED", "DONE"],
+      SHIPPED: ["DONE"],
+      DONE: [],
       CANCELLED: [],
     };
 
-    if (!allowedNext[current].includes(status)) {
-      return res.status(400).json({ message: `Không thể chuyển từ ${current} -> ${status}` });
+    const next = trang_thai.toUpperCase();
+    if (!allowedNext[current].includes(next)) {
+      return res.status(400).json({ message: `Không thể chuyển từ ${current} → ${next}` });
     }
 
-    await ord.update({ trang_thai: status });
-    res.json({ message: "Cập nhật thành công", id_don: ord.id_don, trang_thai: status });
+    await ord.update({ trang_thai: next });
+
+    res.json({
+      message: "✅ Cập nhật trạng thái thành công",
+      data: { id_don: ord.id_don, trang_thai: next },
+    });
   } catch (e) {
     console.error("[updateOrderStatus]", e);
     res.status(500).json({ message: "Server error" });
   }
 }
 
+
 export async function createOrder(req, res) {
   try {
-    // Lấy dữ liệu từ body
-    const { id_kh, ho_ten_nhan, sdt_nhan, dia_chi_nhan, pttt, chi_tiet } = req.body;
-    // Tạo đơn hàng mới
-   const order = await Order.create({
-  id_kh,
-  ho_ten_nhan,
-  sdt_nhan,
-  dia_chi_nhan,
-  pttt,
-  trang_thai: "PENDING",
-  ngay_dat: new Date(),
-});
+    const { items, id_kh, ho_ten_nhan, sdt_nhan, dia_chi_nhan, pttt = "COD" } = req.body;
 
-    // Nếu có chi tiết đơn hàng, thêm vào bảng OrderDetail
-    if (Array.isArray(chi_tiet)) {
-      for (const ct of chi_tiet) {
-        await OrderDetail.create({
-          id_don: order.id_don,
-          id_mon: ct.id_mon,
-          so_luong: ct.so_luong,
-          gia: ct.gia,
-        });
-      }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: "Thiếu danh sách sản phẩm (items)" });
     }
-    res.status(201).json({ message: "Tạo đơn hàng thành công", order });
+
+    const order = await Order.create({
+      id_kh,
+      ho_ten_nhan: ho_ten_nhan || "Khách hàng",
+      sdt_nhan: sdt_nhan || "000000000",
+      dia_chi_nhan: dia_chi_nhan || "Chưa cập nhật",
+      pttt,
+      trang_thai: "pending",
+      ngay_dat: new Date(),
+    });
+
+    // ✅ Thêm chi tiết đơn hàng
+    for (const item of items) {
+      await OrderDetail.create({
+        id_don: order.id_don,
+        id_mon: item.id_mon,
+        so_luong: item.so_luong,
+        gia: item.gia,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Tạo đơn hàng thành công",
+      data: order,
+    });
   } catch (err) {
-    res.status(500).json({ message: "Lỗi tạo đơn hàng", error: err.message });
+    console.error("❌ Lỗi tạo đơn hàng:", err);
+    res.status(500).json({ message: "Lỗi máy chủ khi tạo đơn hàng" });
   }
 }
+
 
 export async function deleteOrder(req, res) {
   try {

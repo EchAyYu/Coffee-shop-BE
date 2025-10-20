@@ -164,5 +164,24 @@ router.delete(
   })
 );
 
+router.get(
+  "/admin",
+  requireAuth,
+  authorizeRoles("admin", "employee"),
+  asyncHandler(getOrdersAdmin)
+);
+
+// ✅ PUT cập nhật trạng thái đơn hàng
+router.put(
+  "/:id/status",
+  requireAuth,
+  authorizeRoles("admin", "employee"),
+  [
+    param("id").isInt().toInt(),
+    body("trang_thai").isString().notEmpty().withMessage("Thiếu trạng thái mới"),
+  ],
+  validate,
+  asyncHandler(updateOrderStatus)
+);
 
 export default router;
