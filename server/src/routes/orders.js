@@ -164,12 +164,46 @@ router.delete(
   })
 );
 
+/** Lấy danh sách đơn hàng cho admin */
 router.get(
-  "/admin",
+  "/admin/list",
   requireAuth,
   authorizeRoles("admin", "employee"),
   asyncHandler(getOrdersAdmin)
 );
+
+/**
+ * Cập nhật trạng thái đơn hàng
+ */
+async function updateOrderStatus(req, res) {
+  const { id } = req.params;
+  const { trang_thai } = req.body;
+
+  const order = await Order.findByPk(id);
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: "Không tìm thấy đơn hàng"
+    });
+  }
+
+  // Validate trạng thái hợp lệ
+  const validStatuses = ["pending", "confirmed", "preparing", "delivering", "completed", "cancelled"];
+  if (!validStatuses.includes(trang_thai)) {
+    return res.status(400).json({
+      success: false,
+      message: `Trạng thái không hợp lệ. Các trạng thái hợp lệ: ${validStatuses.join(", ")}`
+    });
+  }
+
+  await order.update({ trang_thai });
+
+  return res.json({
+    success: true,
+    message: "Cập nhật trạng thái thành công",
+    data: order
+  });
+}
 
 // ✅ PUT cập nhật trạng thái đơn hàng
 router.put(
@@ -184,4 +218,4 @@ router.put(
   asyncHandler(updateOrderStatus)
 );
 
-export default router;
+export default router

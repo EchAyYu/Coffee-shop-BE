@@ -33,6 +33,7 @@ import reviewsRouter from "./routes/reviews.js";
 import adminRouter from "./routes/admin.js";
 import statsRouter from "./routes/stats.js";
 import adminOrdersRoute from "./routes/adminOrders.route.js";
+import tablesRouter from "./routes/tables.js";
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -104,6 +105,7 @@ app.use("/api/products", productsRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/reviews", reviewsRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/tables", tablesRouter);
 
 // Private user routes
 app.use("/api/orders", ordersRouter);

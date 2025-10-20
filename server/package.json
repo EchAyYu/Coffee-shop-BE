@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node src/app.js"
+    "dev": "node src/app.js",
+    "seed:tables": "node src/seedTables.js",
+    "seed:products": "node src/seedProducts.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -24,4 +26,5 @@
   "devDependencies": {
     "nodemon": "^3.1.10"
   }
+  
 }
