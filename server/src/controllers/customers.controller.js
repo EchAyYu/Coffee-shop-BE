@@ -116,3 +116,52 @@ export async function deleteCustomer(req, res) {
     res.status(500).json({ message: "Lỗi xóa khách hàng", error: err.message });
   }
 }
+
+
+// ===========================
+// 👤 Lấy thông tin khách hàng hiện tại
+// GET /api/customers/me
+// ===========================
+export async function getMyInfo(req, res) {
+  try {
+    const accountId = req.user?.id_tk; // Lấy id_tk từ token middleware
+    if (!accountId) {
+      return res.status(401).json({ message: "Không xác thực được người dùng" });
+    }
+
+    const customer = await Customer.findOne({ where: { id_tk: accountId } });
+    if (!customer) {
+      return res.status(404).json({ message: "Không tìm thấy thông tin khách hàng" });
+    }
+
+    res.json(customer);
+  } catch (err) {
+    console.error("[getMyInfo]", err);
+    res.status(500).json({ message: "Lỗi máy chủ", error: err.message });
+  }
+}
+
+// ===========================
+// ✏️ Cập nhật thông tin khách hàng hiện tại
+// PUT /api/customers/me
+// ===========================
+export async function updateMyInfo(req, res) {
+  try {
+    const accountId = req.user?.id_tk;
+    if (!accountId) {
+      return res.status(401).json({ message: "Không xác thực được người dùng" });
+    }
+
+    const { ho_ten, email, so_dt, dia_chi } = req.body;
+    const customer = await Customer.findOne({ where: { id_tk: accountId } });
+    if (!customer) {
+      return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+    }
+
+    await customer.update({ ho_ten, email, sdt: so_dt, dia_chi });
+    res.json({ message: "Cập nhật thông tin thành công", customer });
+  } catch (err) {
+    console.error("[updateMyInfo]", err);
+    res.status(500).json({ message: "Lỗi cập nhật thông tin", error: err.message });
+  }
+}

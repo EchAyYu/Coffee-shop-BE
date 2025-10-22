@@ -1,5 +1,5 @@
 // ================================
-// 🔒 Authentication Middleware (final optimized)
+// 🔒 Authentication Middleware (FINAL FIXED)
 // ================================
 
 import jwt from "jsonwebtoken";
@@ -8,21 +8,17 @@ import Account from "../models/Account.js";
 const ACCESS_SECRET = process.env.JWT_SECRET || "secretkey";
 
 /**
- * 🔹 Lấy access token từ header Authorization hoặc cookie (fallback)
- * Ưu tiên Authorization: Bearer <token>
+ * 🔹 Lấy token từ header Authorization hoặc cookie
  */
 function getAccessToken(req) {
   const header = req.headers.authorization || "";
   const [scheme, token] = header.split(" ");
   if (scheme?.toLowerCase() === "bearer" && token) return token;
-
-  // Fallback: cookie (chỉ nếu bạn lưu access_token vào cookie)
-  const cookieToken = req.cookies?.access_token;
-  return cookieToken || null;
+  return req.cookies?.access_token || null;
 }
 
 /**
- * 🔹 Chuẩn hoá role
+ * 🔹 Chuẩn hóa role
  */
 function normalizeRole(role, fallback = "user") {
   if (!role) return fallback;
@@ -30,89 +26,43 @@ function normalizeRole(role, fallback = "user") {
 }
 
 /**
- * 🔹 Xây dựng đối tượng user chuẩn cho req.user
- */
-function buildReqUser(acc, payload) {
-  const id = acc?.id_tk ?? acc?.id ?? payload?.id_tk ?? payload?.id ?? payload?.userId ?? null;
-  const role = normalizeRole(acc?.role ?? payload?.role, "user");
-  const username = acc?.ten_dn ?? payload?.ten_dn ?? acc?.username ?? payload?.username ?? null;
-  const email = acc?.email ?? payload?.email ?? null;
-
-  return { id, role, username, email };
-}
-
-/**
- * 🧩 Middleware: Kiểm tra access token & xác minh tài khoản
+ * 🧠 Middleware xác thực người dùng (ASYNC)
  */
 export async function requireAuth(req, res, next) {
   try {
     const token = getAccessToken(req);
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "Chưa đăng nhập hoặc thiếu token",
-      });
+      return res.status(401).json({ success: false, message: "Chưa đăng nhập" });
     }
 
-    // ✅ Verify access token
-    const payload = jwt.verify(token, ACCESS_SECRET);
+    const decoded = jwt.verify(token, ACCESS_SECRET);
+    const id_tk = decoded.id_tk || decoded.id;
 
-    // Lấy ID từ payload
-    const userId = payload?.id_tk ?? payload?.id ?? payload?.userId;
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Token không hợp lệ (thiếu id)",
-      });
+    const account = await Account.findByPk(id_tk);
+    if (!account) {
+      return res.status(401).json({ success: false, message: "Tài khoản không tồn tại" });
     }
 
-    // ✅ Kiểm tra tài khoản trong DB
-    const acc =
-      (await Account.findByPk(userId)) ||
-      (await Account.findOne({ where: { id_tk: userId } }));
+    req.user = {
+      id_tk: account.id_tk,
+      ten_dn: account.ten_dn,
+      role: normalizeRole(account.role),
+    };
 
-    if (!acc) {
-      return res.status(401).json({
-        success: false,
-        message: "Tài khoản không tồn tại hoặc đã bị xóa",
-      });
-    }
-
-    // ✅ Gán user vào req
-    req.user = buildReqUser(acc, payload);
     next();
   } catch (err) {
-    if (err.name === "TokenExpiredError") {
-      return res.status(401).json({
-        success: false,
-        message: "Token đã hết hạn. FE sẽ tự refresh lại.",
-        expired: true,
-      });
-    }
-    if (err.name === "JsonWebTokenError") {
-      return res.status(401).json({
-        success: false,
-        message: "Token không hợp lệ",
-      });
-    }
-
-    console.error("[Auth Middleware Error]", err);
-    return res.status(500).json({
-      success: false,
-      message: "Lỗi xác thực nội bộ",
-    });
+    console.error("[requireAuth]", err);
+    return res.status(401).json({ success: false, message: "Token không hợp lệ hoặc hết hạn" });
   }
 }
 
-// Cho tương thích với code cũ
 export const authMiddleware = requireAuth;
 
 /**
- * 🧠 Middleware: Chỉ cho phép các vai trò cụ thể
- * @example router.get('/admin', authorizeRoles('admin'), handler)
+ * 🧩 Cho phép các vai trò cụ thể
  */
 export function authorizeRoles(...roles) {
-  const allowed = roles.map((r) => String(r).toLowerCase());
+  const allowed = roles.map((r) => normalizeRole(r));
   return (req, res, next) => {
     if (!req.user?.role) {
       return res.status(401).json({ success: false, message: "Chưa đăng nhập" });
@@ -138,21 +88,3 @@ export function requireAdmin(req, res, next) {
   }
   next();
 }
-
-/**
- * 🧩 Cho phép nhân viên hoặc admin (nội bộ)
- */
-export function requireStaff(req, res, next) {
-  if (!req.user?.role) {
-    return res.status(401).json({ success: false, message: "Chưa đăng nhập" });
-  }
-  const role = normalizeRole(req.user.role);
-  if (!["admin", "employee", "staff"].includes(role)) {
-    return res
-      .status(403)
-      .json({ success: false, message: "Chỉ nhân viên hoặc admin được truy cập" });
-  }
-  next();
-}
-
-

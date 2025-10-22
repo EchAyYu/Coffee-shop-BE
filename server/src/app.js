@@ -35,6 +35,7 @@ import statsRouter from "./routes/stats.js";
 import adminOrdersRoute from "./routes/adminOrders.route.js";
 import tablesRouter from "./routes/tables.js";
 import homeContentRoutes from "./routes/homeContentRoutes.js";
+import customerProfileRoutes from "./routes/customerProfileRoutes.js";
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -108,7 +109,7 @@ app.use("/api/reviews", reviewsRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/tables", tablesRouter);
 app.use("/api/home-content", homeContentRoutes);
-
+app.use("/api/customer-profile", customerProfileRoutes);
 // Private user routes
 app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
