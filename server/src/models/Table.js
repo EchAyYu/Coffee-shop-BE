@@ -1,6 +1,3 @@
-// ===============================
-// ☕ Coffee Shop Backend - Table Model
-// ===============================
 import { DataTypes } from "sequelize";
 import sequelize from "../utils/db.js";
 
@@ -22,10 +19,11 @@ const Table = sequelize.define("Table", {
     comment: "Tên mô tả bàn"
   },
   khu_vuc: {
-    type: DataTypes.STRING(50),
+    // 💡 SỬA ĐỔI QUAN TRỌNG: Chuyển sang ENUM
+    type: DataTypes.ENUM("indoor", "outside", "vip"),
     allowNull: false,
-    defaultValue: "main",
-    comment: "Khu vực: main, vip, outdoor, rooftop"
+    defaultValue: "indoor",
+    comment: "Khu vực: indoor (phòng lạnh), outside (ngoài trời), vip (phòng vip)"
   },
   suc_chua: {
     type: DataTypes.INTEGER,
