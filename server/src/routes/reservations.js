@@ -44,20 +44,26 @@ const router = express.Router();
  *                 type: integer
  *                 example: 4
  */
+// BE - reservations.routes.js
+
 router.post(
   "/",
   requireAuth,
   authorizeRoles("customer"),
   [
-    body("date").notEmpty().withMessage("Thiếu ngày đặt bàn"),
-    body("time").notEmpty().withMessage("Thiếu giờ đặt bàn"),
-    body("numberOfPeople")
+    // SỬA Ở ĐÂY: 'date' -> 'ngay_dat'
+    body("ngay_dat").notEmpty().withMessage("Thiếu ngày đặt bàn"),
+    
+    // SỬA Ở ĐÂY: 'time' -> 'gio_dat'
+    body("gio_dat").notEmpty().withMessage("Thiếu giờ đặt bàn"),
+    
+    // SỬA Ở ĐÂY: 'numberOfPeople' -> 'so_nguoi'
+    body("so_nguoi")
       .isInt({ min: 1 })
       .withMessage("Số lượng người phải hợp lệ"),
   ],
   asyncHandler(createReservation)
 );
-
 /**
  * @swagger
  * /api/reservations/my:

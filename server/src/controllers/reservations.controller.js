@@ -9,10 +9,10 @@ import Customer from "../models/Customer.js";
  */
 export async function createReservation(req, res) {
   try {
-    const { ho_ten, sdt, ngay_dat, so_nguoi, ghi_chu } = req.body;
+    const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu } = req.body;
 
     // 🔹 Kiểm tra tài khoản có tồn tại trong bảng khách hàng
-    const customer = await Customer.findOne({ where: { id_tk: req.user.id } });
+   const customer = await Customer.findOne({ where: { id_tk: req.user.id_tk } });
     if (!customer) {
       return res.status(400).json({
         success: false,
@@ -21,17 +21,18 @@ export async function createReservation(req, res) {
     }
 
     // 🔹 Tạo đặt bàn mới
-    const newR = await Reservation.create({
+   const newR = await Reservation.create({
       id_kh: customer.id_kh,
       ho_ten,
       sdt,
       ngay_dat,
+      gio_dat, // 💡 THÊM DÒNG NÀY
       so_nguoi,
       ghi_chu,
       trang_thai: "PENDING",
     });
 
-    res.status(201).json({
+   res.status(201).json({
       success: true,
       message: "Đặt bàn thành công",
       reservation: newR,
