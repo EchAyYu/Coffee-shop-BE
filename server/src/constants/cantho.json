@@ -1,0 +1,14 @@
+{
+  "province": "Cần Thơ",
+  "districts": {
+    "Ninh Kiều": ["An Bình","An Cư","An Hoà","An Khánh","An Nghiệp","An Phú","Cái Khế","Hưng Lợi","Tân An","Thới Bình","Xuân Khánh"],
+    "Bình Thuỷ": ["Bình Thuỷ","Bùi Hữu Nghĩa","Long Hoà","Long Tuyền","Thới An Đông","Trà Nóc","Trà An"],
+    "Cái Răng": ["Ba Láng","Hưng Phú","Hưng Thạnh","Lê Bình","Phú Thứ","Thường Thạnh","Tân Phú"],
+    "Ô Môn": ["Châu Văn Liêm","Long Hưng","Phước Thới","Thới An","Thới Hoà","Thới Long","Trường Lạc"],
+    "Thốt Nốt": ["Thốt Nốt","Thạnh Hoà","Thới Thuận","Thuận An","Tân Hưng","Tân Lộc"],
+    "Phong Điền": ["Giai Xuân","Mỹ Khánh","Nhơn Ái","Nhơn Nghĩa","Tân Thới","Trường Long"],
+    "Cờ Đỏ": ["Định Môn","Đông Hiệp","Đông Thắng","Thạnh Phú","Thới Đông","Trung An","Trung Hưng","Trung Thạnh"],
+    "Vĩnh Thạnh": ["Thạnh An","Thạnh Lộc","Thạnh Lợi","Thạnh Mỹ","Thạnh Quới","Thạnh Thắng","Thạnh Tiến","Vĩnh Bình","Vĩnh Trinh"],
+    "Thới Lai": ["Thới Lai","Đông Bình","Đông Thuận","Tân Thạnh","Thới Tân","Trường Thắng","Trường Thành","Trường Xuân","Trường Xuân A","Trường Xuân B"]
+  }
+}

@@ -9,6 +9,7 @@ import { validationResult } from "express-validator";
 import Account from "../models/Account.js";
 import Customer from "../models/Customer.js";
 import sequelize from "../utils/db.js";
+import { composeFullAddress } from "../utils/address.js";
 
 dotenv.config();
 
@@ -33,7 +34,7 @@ export async function register(req, res) {
 
   const t = await sequelize.transaction();
   try {
-    const { ten_dn, mat_khau, ho_ten, email, sdt, dia_chi } = req.body;
+    const { ten_dn, mat_khau, ho_ten, email, sdt, dia_chi, street, ward, district, province } = req.body;
 
     const existedUser = await Account.findOne({ where: { ten_dn }, transaction: t });
     if (existedUser) {
@@ -52,16 +53,26 @@ export async function register(req, res) {
     const hash = await bcrypt.hash(mat_khau, 10);
     const account = await Account.create({ ten_dn, mat_khau: hash, role: "customer" }, { transaction: t });
 
-    await Customer.create(
-      {
-        ho_ten: ho_ten || "Khách hàng",
-        email: email || null,
-        sdt: sdt || null,
-        dia_chi: dia_chi || null,
-        id_tk: account.id_tk,
-      },
+const _province = province || "Cần Thơ";
+const fullAddress =
+  street || ward || district || province
+    ? composeFullAddress({ street, ward, district, province: _province })
+    : (dia_chi || null);
+
+  await Customer.create(
+    {
+      ho_ten: ho_ten || "Khách hàng",
+      email: email || null,
+      sdt: sdt || null,
+      dia_chi: fullAddress,   // luôn lưu chuỗi tổng hợp để tương thích chỗ cũ
+      street: street || null,
+      ward: ward || null,
+      district: district || null,
+      province: _province,
+      id_tk: account.id_tk,
+    },
       { transaction: t }
-    );
+  );
 
     await t.commit();
     return res.status(201).json({ success: true, message: "Đăng ký thành công" });
