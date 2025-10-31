@@ -7,8 +7,11 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
-import cookieParser from "cookie-parser";
 dotenv.config();
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 // --- Config & Utils ---
 import { config } from "./config/config.js";
@@ -17,10 +20,10 @@ import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 import { swaggerDocs } from "./config/swagger.js";
 
 // --- Middleware bảo vệ ---
-import { requireAuth, requireAdmin } from "./middlewares/authMiddleware.js";
+import { requireAuth, requireAdmin, authorizeRoles } from "./middlewares/authMiddleware.js";
 import { globalLimiter } from "./middlewares/rateLimit.js";
 
-// --- Routers ---
+// --- Routers (bắt buộc phải có) ---
 import authRouter from "./routes/auth.js";
 import productsRouter from "./routes/products.js";
 import ordersRouter from "./routes/orders.js";
@@ -37,6 +40,12 @@ import tablesRouter from "./routes/tables.js";
 import homeContentRoutes from "./routes/homeContentRoutes.js";
 import customerProfileRoutes from "./routes/customerProfileRoutes.js";
 import profileRoutes from "./routes/profile.js";
+
+// Các route “có thể có” (optional) sẽ import động phía dưới:
+//  - ./routes/loyalty.js
+//  - ./routes/vouchers.js
+//  - ./routes/voucherRedemptions.js
+//  - ./routes/notifications.js
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -89,7 +98,6 @@ app.use(
 // ===============================
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 // ===============================
 // 🚦 RATE LIMIT
@@ -97,7 +105,7 @@ app.use(cookieParser());
 app.use("/api/", globalLimiter);
 
 // ===============================
-// 🚀 ROUTES
+// 🚀 ROUTES BẮT BUỘC
 // ===============================
 
 // Auth
@@ -112,6 +120,7 @@ app.use("/api/tables", tablesRouter);
 app.use("/api/home-content", homeContentRoutes);
 app.use("/api/customer-profile", customerProfileRoutes);
 app.use("/api/profile", profileRoutes);
+
 // Private user routes
 app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
@@ -128,7 +137,52 @@ app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
 // Health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// Swagger API docs
+// ===============================
+// 📦 ROUTES TÙY CHỌN (IMPORT ĐỘNG)
+// ===============================
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Mount một route nếu file module tồn tại.
+ * @param {string} urlPrefix - prefix URL, vd: "/api/voucher-redemptions"
+ * @param {string} relModulePath - đường dẫn module tương đối tới app.js, vd: "./routes/voucherRedemptions.js"
+ * @param {Array<Function>} middlewares - danh sách middleware áp trước router
+ */
+async function mountIfExists(urlPrefix, relModulePath, middlewares = []) {
+  const absPath = path.resolve(__dirname, relModulePath.replace("./", ""));
+  if (!fs.existsSync(absPath)) {
+    console.warn(`ℹ️  Route file not found, skip mounting: ${relModulePath}`);
+    return;
+  }
+  try {
+    const mod = await import(relModulePath);
+    const router = mod.default;
+    if (!router) {
+      console.warn(`ℹ️  Route "${relModulePath}" không export default, bỏ qua.`);
+      return;
+    }
+    if (middlewares.length) {
+      app.use(urlPrefix, ...middlewares, router);
+    } else {
+      app.use(urlPrefix, router);
+    }
+    console.log(`✅ Mounted route ${urlPrefix} from ${relModulePath}`);
+  } catch (e) {
+    console.error(`❌ Lỗi import route ${relModulePath}:`, e?.message || e);
+  }
+}
+
+// Gắn các route optional (nếu có file)
+await mountIfExists("/api/loyalty", "./routes/loyalty.js"); // nếu bạn đã tạo
+await mountIfExists("/api/vouchers", "./routes/vouchers.js", [requireAuth, authorizeRoles("customer")]);
+await mountIfExists("/api/voucher-redemptions", "./routes/voucherRedemptions.js", [requireAuth, authorizeRoles("customer")]);
+await mountIfExists("/api/notifications", "./routes/notifications.js", [requireAuth]);
+
+// ===============================
+// 📜 Swagger API docs
+// ===============================
 swaggerDocs(app);
 
 // ===============================
@@ -155,7 +209,6 @@ export const startServer = async () => {
     console.error("❌ Database connection error:", err);
   }
 };
-
 
 export default app;
 startServer();

@@ -59,12 +59,19 @@ const Order = sequelize.define("Order", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  points_awarded: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
 }, {
   tableName: "don_hang",
-  timestamps: true, // Nên bật timestamps để biết ngày tạo/cập nhật
+  timestamps: true, 
   createdAt: 'ngay_tao',
   updatedAt: 'ngay_cap_nhat'
-});
+}
+);
+
+
 
 // Quan hệ với Customer (Đã có sẵn)
 Order.belongsTo(Customer, { foreignKey: "id_kh" });

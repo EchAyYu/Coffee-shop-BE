@@ -1,50 +1,124 @@
+// server/src/controllers/orders.controller.js
 import { Op } from "sequelize";
-import db from "../models/index.js"; // Import db để lấy các model
-import { sendOrderConfirmationEmail } from "../utils/mailer.js"; // 💡 Import hàm gửi mail
+import sequelize from "../utils/db.js";
+import db from "../models/index.js";
+import Voucher from "../models/Voucher.js";
+import VoucherRedemption from "../models/VoucherRedemption.js";
+import { sendOrderConfirmationEmail } from "../utils/mailer.js";
 
-const { Order, OrderDetail, Product, Customer } = db; // Lấy các model từ db
+const { Order, OrderDetail, Product, Customer, Account, Notification } = db;
 
-// Trạng thái đơn hàng hợp lệ cho admin update
-const ALLOWED_STATUS_UPDATE = ["PENDING", "PENDING_PAYMENT", "CONFIRMED", "COMPLETED", "CANCELLED"]; // Bổ sung PENDING_PAYMENT
+// ====== Loyalty config ======
+const POINT_RATE = 0.01;                 // 1% giá trị đơn
+const POINT_ROUND = (v) => Math.floor(v); // làm tròn xuống
+
+// ====== Helper: tạo thông báo ======
+async function pushNoti({ id_tk, type = "order", title, message }) {
+  if (!id_tk) return;
+  try {
+    await Notification.create({ id_tk, type, title, message });
+  } catch (e) {
+    console.error("pushNoti error:", e?.message);
+  }
+}
+
+// ====== Helper: cộng điểm (chống cộng lặp) ======
+async function awardPointsIfEligible(order) {
+  try {
+    if (!order || order.points_awarded || order.trang_thai !== "completed" || !order.id_kh) return;
+
+    const customer = await Customer.findByPk(order.id_kh);
+    if (!customer) return;
+
+    const toAdd = POINT_ROUND(Number(order.tong_tien || 0) * POINT_RATE);
+    if (toAdd <= 0) return;
+
+    await customer.update({ diem: (customer.diem || 0) + toAdd });
+    await order.update({ points_awarded: true });
+
+    const account = await Account.findByPk(customer.id_tk);
+    await pushNoti({
+      id_tk: account?.id_tk,
+      title: `Tích điểm từ đơn #${order.id_don}`,
+      message: `Bạn vừa nhận ${toAdd} điểm. Tổng điểm hiện tại: ${(customer.diem || 0) + toAdd}.`,
+    });
+  } catch (e) {
+    console.error("awardPointsIfEligible error:", e?.message);
+  }
+}
+
+// ========== Lịch sử đơn của tôi ==========
+export async function getMyOrders(req, res) {
+  try {
+    const page  = Number(req.query.page || 1);
+    const limit = Number(req.query.limit || 10);
+    const offset = (page - 1) * limit;
+
+    const status = (req.query.status || "completed,cancelled")
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+    const meAccountId = req.user?.id_tk || req.user?.id;
+    const meCustomer = await Customer.findOne({ where: { id_tk: meAccountId } });
+    if (!meCustomer) return res.status(404).json({ success: false, message: "Không tìm thấy khách hàng" });
+
+    const where = { id_kh: meCustomer.id_kh, trang_thai: { [Op.in]: status } };
+
+    const { count, rows } = await Order.findAndCountAll({
+      where,
+      include: [{ model: OrderDetail, required: false, include: [{ model: Product, attributes: ["id_mon", "ten_mon", "anh"] }] }],
+      order: [["ngay_dat", "DESC"]],
+      limit,
+      offset,
+      distinct: true
+    });
+
+    res.json({
+      success: true,
+      data: rows,
+      pagination: { totalItems: count, currentPage: page, totalPages: Math.ceil(count / limit), limit }
+    });
+  } catch (e) {
+    console.error("getMyOrders error:", e);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi lấy lịch sử đơn hàng." });
+  }
+}
 
 /**
- * 🛒 Khách hàng hoặc khách vãng lai tạo đơn hàng mới
- * POST /api/orders
+ * 🛒 Tạo đơn hàng
+ * Body có thể kèm voucher_code (yêu cầu đã đăng nhập)
  */
 export async function createOrder(req, res) {
-  // Lấy thông tin từ request body
-  const { ho_ten_nhan, sdt_nhan, dia_chi_nhan, email_nhan, pttt, ghi_chu, items } = req.body;
-  const user = req.user; // Lấy thông tin user từ middleware requireAuth (nếu có)
+  const {
+    ho_ten_nhan, sdt_nhan, dia_chi_nhan, email_nhan, pttt, ghi_chu, items,
+    voucher_code
+  } = req.body;
+
+  const user = req.user;
 
   let customer = null;
   let id_kh = null;
 
-  // Nếu user đã đăng nhập, tìm thông tin customer tương ứng
   if (user?.id_tk) {
     try {
       customer = await Customer.findOne({ where: { id_tk: user.id_tk } });
-      if (customer) {
-        id_kh = customer.id_kh;
-      } else {
-         console.warn(`Không tìm thấy Customer cho Account ID: ${user.id_tk}`);
-      }
+      if (customer) id_kh = customer.id_kh;
+      else console.warn(`Không tìm thấy Customer cho Account ID: ${user.id_tk}`);
     } catch (findErr) {
-       console.error(`Lỗi tìm Customer cho Account ID: ${user.id_tk}`, findErr);
+      console.error(`Lỗi tìm Customer cho Account ID: ${user.id_tk}`, findErr);
     }
   }
 
-  // --- Tính toán tổng tiền & Kiểm tra sản phẩm ---
+  // --- Tính subtotal & kiểm tra sản phẩm ---
   let calculatedTotal = 0;
-  const productDetails = []; // Lưu chi tiết sản phẩm để tạo OrderDetail
+  const productDetails = [];
 
   try {
     const productIds = items.map(item => item.id_mon);
     const productsInDb = await Product.findAll({
       where: { id_mon: { [Op.in]: productIds } },
-      attributes: ['id_mon', 'gia', 'ten_mon'] // Chỉ lấy các trường cần thiết
+      attributes: ["id_mon", "gia", "ten_mon"]
     });
 
-    // Tạo map để dễ dàng truy xuất giá
     const productMap = new Map(productsInDb.map(p => [p.id_mon, { gia: p.gia, ten_mon: p.ten_mon }]));
 
     for (const item of items) {
@@ -52,14 +126,14 @@ export async function createOrder(req, res) {
       if (!productInfo) {
         return res.status(400).json({ success: false, message: `Sản phẩm với ID ${item.id_mon} không tồn tại.` });
       }
-      const itemPrice = parseFloat(productInfo.gia); // Lấy giá từ DB
+      const itemPrice = parseFloat(productInfo.gia);
       const itemTotal = itemPrice * item.so_luong;
       calculatedTotal += itemTotal;
       productDetails.push({
         id_mon: item.id_mon,
         so_luong: item.so_luong,
-        gia: itemPrice, // Lưu giá tại thời điểm đặt hàng
-        Product: { ten_mon: productInfo.ten_mon } // Thêm tên món để gửi mail
+        gia: itemPrice,
+        Product: { ten_mon: productInfo.ten_mon }
       });
     }
   } catch (dbError) {
@@ -67,33 +141,81 @@ export async function createOrder(req, res) {
     return res.status(500).json({ success: false, message: "Lỗi máy chủ khi kiểm tra sản phẩm." });
   }
 
-  // --- Tạo đơn hàng ---
+  // --- VOUCHER (nếu có) ---
+  let discount = 0;
+  let redemptionToUse = null;
+
+  try {
+    if (voucher_code) {
+      if (!user?.id_tk) {
+        return res.status(401).json({ success: false, message: "Cần đăng nhập để dùng voucher." });
+      }
+      redemptionToUse = await VoucherRedemption.findOne({ where: { code: voucher_code, id_tk: user.id_tk } });
+      if (!redemptionToUse || redemptionToUse.status !== "active") {
+        return res.status(400).json({ success: false, message: "Mã voucher không hợp lệ." });
+      }
+      if (redemptionToUse.expires_at && new Date(redemptionToUse.expires_at) <= new Date()) {
+        return res.status(400).json({ success: false, message: "Mã voucher đã hết hạn." });
+      }
+      const voucher = await Voucher.findByPk(redemptionToUse.voucher_id);
+      if (!voucher || !voucher.active) {
+        return res.status(400).json({ success: false, message: "Voucher không hợp lệ." });
+      }
+      if (calculatedTotal < Number(voucher.min_order || 0)) {
+        return res.status(400).json({ success: false, message: "Chưa đạt giá trị tối thiểu để dùng mã." });
+      }
+
+      if (voucher.discount_type === "fixed") {
+        discount = Number(voucher.discount_value);
+      } else {
+        discount = (calculatedTotal * Number(voucher.discount_value)) / 100;
+      }
+      const cap = voucher.max_discount ? Number(voucher.max_discount) : discount;
+      discount = Math.min(discount, cap, calculatedTotal);
+    }
+  } catch (e) {
+    console.error("❌ Lỗi xử lý voucher:", e);
+    return res.status(500).json({ success: false, message: "Lỗi máy chủ khi xử lý voucher." });
+  }
+
+  // --- Tạo đơn + chi tiết ---
   let newOrder;
   try {
     newOrder = await Order.create({
-      id_kh: id_kh, // Liên kết với khách hàng nếu đã đăng nhập
+      id_kh,
       ho_ten_nhan,
       sdt_nhan,
       dia_chi_nhan,
       email_nhan,
       pttt,
       ghi_chu,
-      // 💡 Quyết định trạng thái dựa trên PTTT
-      trang_thai: pttt === 'BANK_TRANSFER' ? 'pending_payment' : 'pending',
-      tong_tien: calculatedTotal, // Lưu tổng tiền đã tính toán
+      trang_thai: pttt === "BANK_TRANSFER" ? "pending_payment" : "pending",
+      tong_tien: calculatedTotal - discount,
     });
 
-    // --- Tạo chi tiết đơn hàng ---
-    // Thêm id_don vào từng item trong productDetails
-    const orderDetailData = productDetails.map(detail => ({
-      ...detail,
-      id_don: newOrder.id_don,
-    }));
-
+    const orderDetailData = productDetails.map(detail => ({ ...detail, id_don: newOrder.id_don }));
     await OrderDetail.bulkCreate(orderDetailData);
 
-    // --- Gửi email xác nhận ---
-    // Gọi hàm gửi mail (không cần chờ, chạy ngầm)
+    // Đánh dấu voucher đã dùng
+    if (redemptionToUse) {
+      await redemptionToUse.update({
+        status: "used",
+        used_order_id: newOrder.id_don,
+        used_at: new Date()
+      });
+    }
+
+    // Thông báo cho chủ đơn nếu có tài khoản
+    if (id_kh) {
+      await pushNoti({
+        id_tk: customer?.id_tk,
+        type: "order",
+        title: `Đặt hàng thành công #${newOrder.id_don}`,
+        message: `Đơn của bạn đang ở trạng thái ${newOrder.trang_thai}.`
+      });
+    }
+
+    // Gửi email (không chờ)
     sendOrderConfirmationEmail(newOrder.toJSON(), productDetails);
 
     res.status(201).json({
@@ -103,12 +225,15 @@ export async function createOrder(req, res) {
         id_don: newOrder.id_don,
         trang_thai: newOrder.trang_thai,
         tong_tien: newOrder.tong_tien,
+        discount
       },
     });
-
   } catch (err) {
-    console.error("❌ Lỗi tạo đơn hàng hoặc chi tiết đơn hàng:", err);
-    // Nếu có lỗi sau khi tạo Order, cần cân nhắc xóa Order đã tạo (rollback)
+    console.error("❌ Lỗi tạo đơn/chi tiết:", err);
+    // rollback voucher nếu đã set used
+    if (redemptionToUse) {
+      try { await redemptionToUse.update({ status: "active", used_order_id: null, used_at: null }); } catch {}
+    }
     if (newOrder && newOrder.id_don) {
       try {
         await Order.destroy({ where: { id_don: newOrder.id_don } });
@@ -121,111 +246,30 @@ export async function createOrder(req, res) {
   }
 }
 
-
 /**
- * 📊 Admin lấy danh sách đơn hàng (có phân trang, lọc)
- * GET /api/orders/list?status=&from=&to=&q=&page=&limit=
- */
-export async function getOrdersAdmin(req, res) {
-  try {
-    const { status, from, to, q, page = 1, limit = 10 } = req.query; // Giới hạn mặc định là 10
-    const where = {};
-
-    // Lọc theo trạng thái (chuyển sang chữ thường nếu model dùng chữ thường)
-    if (status) {
-       // Kiểm tra xem status có hợp lệ không nếu cần
-       where.trang_thai = status.toLowerCase();
-    }
-    // Lọc theo ngày đặt
-    if (from || to) {
-      where.ngay_dat = {
-        ...(from ? { [Op.gte]: new Date(from) } : {}),
-        ...(to ? { [Op.lte]: new Date(to) } : {}),
-      };
-    }
-    // Tìm kiếm (tên, sđt, địa chỉ)
-    if (q) {
-      where[Op.or] = [
-        { ho_ten_nhan: { [Op.like]: `%${q}%` } },
-        { sdt_nhan: { [Op.like]: `%${q}%` } },
-        { dia_chi_nhan: { [Op.like]: `%${q}%` } },
-      ];
-    }
-
-    const offset = (Number(page) - 1) * Number(limit);
-
-    const { count, rows } = await Order.findAndCountAll({
-      where,
-      include: [
-        { model: Customer, attributes: ['id_kh', 'ho_ten', 'email'] }, // Lấy thông tin khách hàng nếu có
-        {
-          model: OrderDetail,
-          required: false, // Left join để vẫn lấy được đơn hàng dù không có chi tiết
-          include: [{ model: Product, attributes: ["id_mon", "ten_mon"] }] // Lấy tên món
-        }
-      ],
-      order: [["ngay_dat", "DESC"]], // Sắp xếp mới nhất trước
-      limit: Number(limit),
-      offset,
-      distinct: true, // Cần thiết khi dùng include và limit/offset
-    });
-
-    res.json({
-      success: true,
-      data: rows,
-      pagination: {
-        totalItems: count,
-        currentPage: Number(page),
-        totalPages: Math.ceil(count / Number(limit)),
-        limit: Number(limit),
-      }
-    });
-  } catch (e) {
-    console.error("❌ Lỗi [getOrdersAdmin]:", e);
-    res.status(500).json({ success: false, message: "Lỗi máy chủ khi lấy danh sách đơn hàng." });
-  }
-}
-
-
-/**
- * 🏷️ Lấy chi tiết một đơn hàng
- * GET /api/orders/:id
+ * 🏷️ Lấy chi tiết đơn
  */
 export async function getOrderById(req, res) {
   try {
     const { id } = req.params;
-    const user = req.user; // Lấy thông tin user đăng nhập (nếu có)
+    const user = req.user;
 
     const order = await Order.findByPk(id, {
       include: [
-        { model: Customer, attributes: ['id_kh', 'ho_ten', 'email'] },
-        {
-          model: OrderDetail,
-          required: false,
-          include: [{ model: Product, attributes: ["id_mon", "ten_mon", "anh"] }] // Lấy ảnh món
-        }
+        { model: Customer, attributes: ["id_kh", "ho_ten", "email"] },
+        { model: OrderDetail, required: false, include: [{ model: Product, attributes: ["id_mon", "ten_mon", "anh"] }] }
       ]
     });
 
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
-    }
+    if (!order) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
 
-    // --- Kiểm tra quyền xem ---
-    // Admin hoặc Employee có thể xem mọi đơn
-    const isAdminOrEmployee = user?.role === 'admin' || user?.role === 'employee';
-
-    // Nếu không phải admin/employee, kiểm tra xem có phải chủ đơn hàng không
+    const isAdminOrEmployee = user?.role === "admin" || user?.role === "employee";
     if (!isAdminOrEmployee) {
-       // Cần đảm bảo user đã đăng nhập và đơn hàng có id_kh
-       if (!user || !order.id_kh) {
-           return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
-       }
-       // Tìm customer của user đăng nhập
-       const customerOfUser = await Customer.findOne({where: {id_tk: user.id_tk}});
-       if (!customerOfUser || customerOfUser.id_kh !== order.id_kh) {
-           return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
-       }
+      if (!user || !order.id_kh) return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
+      const customerOfUser = await Customer.findOne({ where: { id_tk: user.id_tk } });
+      if (!customerOfUser || customerOfUser.id_kh !== order.id_kh) {
+        return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
+      }
     }
 
     res.json({ success: true, data: order });
@@ -235,84 +279,89 @@ export async function getOrderById(req, res) {
   }
 }
 
-
 /**
- * 🔄 Admin/Employee cập nhật trạng thái đơn hàng
- * PUT /api/orders/:id/status
+ * 🔄 Cập nhật trạng thái (Admin/Employee)
  */
 export async function updateOrderStatus(req, res) {
   try {
     const { id } = req.params;
-    const { trang_thai } = req.body; // Trạng thái mới (chữ thường từ route validation)
-
-    // Validate trạng thái hợp lệ (đã được làm ở route)
-    // const validStatuses = ["pending", "pending_payment", "confirmed", "completed", "cancelled"];
-    // if (!validStatuses.includes(trang_thai)) { ... } // Không cần lặp lại validation
+    const { trang_thai } = req.body;
 
     const order = await Order.findByPk(id);
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
-    }
+    if (!order) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
 
-    // Optional: Thêm logic kiểm tra chuyển đổi trạng thái nếu cần
-    // Ví dụ: không cho chuyển từ completed về pending
-    const currentStatus = order.trang_thai;
-    if (currentStatus === 'completed' && trang_thai !== 'completed') {
-       return res.status(400).json({ success: false, message: "Không thể thay đổi trạng thái của đơn hàng đã hoàn thành." });
+    const prev = order.trang_thai;
+    if (prev === "completed" && trang_thai !== "completed") {
+      return res.status(400).json({ success: false, message: "Không thể thay trạng thái đơn đã hoàn thành." });
     }
-    if (currentStatus === 'cancelled' && trang_thai !== 'cancelled') {
-        return res.status(400).json({ success: false, message: "Không thể thay đổi trạng thái của đơn hàng đã hủy." });
+    if (prev === "cancelled" && trang_thai !== "cancelled") {
+      return res.status(400).json({ success: false, message: "Không thể thay trạng thái đơn đã hủy." });
     }
-
 
     await order.update({ trang_thai });
 
-    // TODO: Gửi email thông báo cập nhật trạng thái nếu cần
-
-    res.json({
-      success: true,
-      message: "Cập nhật trạng thái thành công",
-      data: { id_don: order.id_don, trang_thai: order.trang_thai },
+    // gửi noti
+    let id_tk = null;
+    if (order.id_kh) {
+      const c = await Customer.findByPk(order.id_kh);
+      id_tk = c?.id_tk || null;
+    }
+    await pushNoti({
+      id_tk,
+      type: "order",
+      title: `Cập nhật đơn hàng #${order.id_don}`,
+      message: `Trạng thái mới: ${trang_thai}.`,
     });
+
+    // cộng điểm nếu completed
+    await awardPointsIfEligible(order);
+
+    res.json({ success: true, message: "Cập nhật trạng thái thành công", data: { id_don: order.id_don, trang_thai: order.trang_thai } });
   } catch (e) {
     console.error(`❌ Lỗi [updateOrderStatus ${req.params.id}]:`, e);
     res.status(500).json({ success: false, message: "Lỗi máy chủ khi cập nhật trạng thái." });
   }
 }
 
-
 /**
- * 🗑️ Admin/Employee xóa đơn hàng
- * DELETE /api/orders/:id
+ * 🗑️ Xóa đơn
  */
 export async function deleteOrder(req, res) {
   try {
     const { id } = req.params;
 
-    // Nên dùng transaction để đảm bảo xóa cả order và order details
     const result = await sequelize.transaction(async (t) => {
-        // Xóa chi tiết đơn hàng trước
-        await OrderDetail.destroy({
-          where: { id_don: id },
-          transaction: t
-        });
-        // Sau đó xóa đơn hàng
-        const deletedOrderRows = await Order.destroy({
-          where: { id_don: id },
-          transaction: t
-        });
-        return deletedOrderRows; // Số lượng hàng đã xóa
+      await OrderDetail.destroy({ where: { id_don: id }, transaction: t });
+      const deletedOrderRows = await Order.destroy({ where: { id_don: id }, transaction: t });
+      return deletedOrderRows;
     });
 
-
-    if (result === 0) { // Nếu không có hàng nào bị xóa (ID không tồn tại)
-      return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
-    }
+    if (result === 0) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
 
     res.json({ success: true, message: "Đã xóa đơn hàng thành công" });
-
   } catch (err) {
     console.error(`❌ Lỗi [deleteOrder ${req.params.id}]:`, err);
     res.status(500).json({ success: false, message: "Lỗi máy chủ khi xóa đơn hàng." });
+  }
+}
+
+/**
+ * 📦 Danh sách đơn hàng (Admin)
+ * Có thể thêm phân trang, lọc theo yêu cầu
+ */
+export async function getOrdersAdmin(req, res) {
+  // Ví dụ: lấy tất cả đơn hàng, có thể thêm phân trang, lọc...
+  try {
+    const orders = await Order.findAll({
+      include: [
+        { model: Customer, attributes: ["id_kh", "ho_ten", "email"] },
+        { model: OrderDetail, include: [{ model: Product, attributes: ["id_mon", "ten_mon", "anh"] }] }
+      ],
+      order: [["ngay_dat", "DESC"]],
+    });
+    res.json({ success: true, data: orders });
+  } catch (err) {
+    console.error("getOrdersAdmin error:", err);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi lấy danh sách đơn hàng." });
   }
 }

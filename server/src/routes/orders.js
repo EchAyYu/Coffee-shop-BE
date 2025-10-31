@@ -1,5 +1,5 @@
 import express from "express";
-import { body, param } from "express-validator";
+import { body, param, query } from "express-validator";
 import { requireAuth, authorizeRoles } from "../middlewares/authMiddleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
@@ -10,7 +10,8 @@ import {
   getOrdersAdmin,
   getOrderById,
   updateOrderStatus,
-  deleteOrder
+  deleteOrder,
+  getMyOrders,
 } from "../controllers/orders.controller.js";
 
 const router = express.Router();
@@ -259,6 +260,19 @@ router.delete(
   [param("id").isInt({ min: 1 }).toInt()],
   validate,
   asyncHandler(deleteOrder) // Sử dụng hàm deleteOrder từ controller
+);
+
+router.get(
+  "/my",
+  requireAuth,
+  authorizeRoles("customer"),
+  [
+    query("status").optional().isString(), // vd: completed,cancelled
+    query("page").optional().isInt({ min: 1 }).toInt(),
+    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+  ],
+  validate,
+  asyncHandler(getMyOrders)
 );
 
 
