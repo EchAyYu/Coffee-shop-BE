@@ -4,6 +4,7 @@ import { requireAuth, authorizeRoles } from "../middlewares/authMiddleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
 import { listCatalog, redeemVoucher, myVouchers, validateCode } from "../controllers/voucher.controller.js";
+//import { redeemVoucher } from "../controllers/loyalty.controller.js";
 
 const router = Router();
 
@@ -32,5 +33,7 @@ router.post(
   validate,
   asyncHandler(validateCode)
 );
+
+router.post("/redeem", requireAuth, authorizeRoles("customer"), asyncHandler(redeemVoucher));
 
 export default router;

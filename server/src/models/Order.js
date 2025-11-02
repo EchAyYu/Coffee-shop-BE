@@ -63,6 +63,10 @@ const Order = sequelize.define("Order", {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
   },
+  diem_nhan_duoc: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
 }, {
   tableName: "don_hang",
   timestamps: true, 

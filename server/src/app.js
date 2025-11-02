@@ -13,6 +13,10 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
+// 🌟 1. IMPORT HTTP VÀ SOCKET 🌟
+import http from "http";
+import { initSocket } from "./socket.js";
+
 // --- Config & Utils ---
 import { config } from "./config/config.js";
 import sequelize from "./utils/db.js";
@@ -194,21 +198,33 @@ app.use(errorHandler);
 // ===============================
 // 🔌 START SERVER FUNCTION
 // ===============================
+
+// 🌟 2. CẬP NHẬT HÀM START SERVER 🌟
 export const startServer = async () => {
-  const PORT = config.port || 4000;
+  const PORT = config.port || 4000;
 
-  try {
-    await sequelize.authenticate();
-    console.log("✅ Connected to MySQL successfully!");
+  try {
+    await sequelize.authenticate();
+    console.log("✅ Connected to MySQL successfully!");
 
-    app.listen(PORT, () => {
-      console.log(`☕ Server is running on http://localhost:${PORT}`);
-      console.log(`🌐 Allowed Origins: ${ALLOW_ORIGINS.join(", ")}`);
-    });
-  } catch (err) {
-    console.error("❌ Database connection error:", err);
-  }
+    // 💡 Tạo HTTP server từ app Express
+    const httpServer = http.createServer(app);
+
+    // 💡 Khởi tạo Socket.io VỚI http server
+    initSocket(httpServer, ALLOW_ORIGINS);
+
+    // 💡 Chạy httpServer.listen THAY VÌ app.listen
+    httpServer.listen(PORT, () => {
+      console.log(`☕ Server is running on http://localhost:${PORT}`);
+      console.log(`🔌 Socket.io initialized.`);
+      console.log(`🌐 Allowed Origins: ${ALLOW_ORIGINS.join(", ")}`);
+    });
+
+  } catch (err) {
+    console.error("❌ Database connection error:", err);
+  }
 };
 
 export default app;
 startServer();
+
