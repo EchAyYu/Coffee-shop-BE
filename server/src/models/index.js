@@ -1,15 +1,17 @@
-// server/src/models/index.js
+// server/src/models/index.js (ĐÃ CẬP NHẬT)
+
 import sequelize from "../utils/db.js";
 import { Sequelize } from "sequelize";
 
 import Category from "./Category.js";
 import Product from "./Product.js";
 import Order from "./Order.js";
-import OrderDetail from "./OrderDetail.js"; // ✅ thêm dòng này
+import OrderDetail from "./OrderDetail.js";
 import Reservation from "./Reservation.js";
 import Customer from "./Customer.js";
 import Account from "./Account.js";
 import Review from "./Review.js";
+import Notification from "./Notification.js"; // 💡 THÊM DÒNG NÀY
 
 // ===============================
 // 🔗 Thiết lập quan hệ
@@ -45,6 +47,10 @@ Review.belongsTo(Customer, { foreignKey: "id_kh" });
 Product.hasMany(Review, { foreignKey: "id_mon" });
 Review.belongsTo(Product, { foreignKey: "id_mon" });
 
+// (Bạn cũng nên thêm quan hệ cho Notification nếu chưa có)
+// Account.hasMany(Notification, { foreignKey: "id_tk" });
+// Notification.belongsTo(Account, { foreignKey: "id_tk" });
+
 // ✅ Xuất toàn bộ
 const db = {
   sequelize,
@@ -52,11 +58,12 @@ const db = {
   Category,
   Product,
   Order,
-  OrderDetail, // ✅ thêm vào export
+  OrderDetail,
   Reservation,
   Customer,
   Account,
   Review,
+  Notification, // 💡 THÊM DÒNG NÀY
 };
 
 export default db;

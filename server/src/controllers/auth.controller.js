@@ -72,7 +72,7 @@ const fullAddress =
       id_tk: account.id_tk,
     },
       { transaction: t }
-  );
+);
 
     await t.commit();
     return res.status(201).json({ success: true, message: "Đăng ký thành công" });

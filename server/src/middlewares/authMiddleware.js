@@ -1,6 +1,4 @@
-// ================================
-// 🔒 Authentication Middleware (FINAL FIXED)
-// ================================
+// src/middlewares/authMiddleware.js (ĐÃ CẬP NHẬT)
 
 import jwt from "jsonwebtoken";
 import Account from "../models/Account.js";
@@ -88,3 +86,36 @@ export function requireAdmin(req, res, next) {
   }
   next();
 }
+
+// ===== 💡 PHẦN MỚI THÊM VÀO (QUAN TRỌNG) =====
+/**
+ * 👤 Middleware tùy chọn: Tải người dùng nếu đã đăng nhập,
+ * nhưng không báo lỗi nếu là khách.
+ */
+export async function loadUserIfAuthenticated(req, res, next) {
+  try {
+    const token = getAccessToken(req);
+    if (!token) {
+      return next(); // Không có token, tiếp tục (req.user sẽ là undefined)
+    }
+
+    const decoded = jwt.verify(token, ACCESS_SECRET);
+    const id_tk = decoded.id_tk || decoded.id;
+
+    const account = await Account.findByPk(id_tk);
+    if (account) {
+      // Đính kèm thông tin user vào request
+      req.user = {
+        id_tk: account.id_tk,
+        ten_dn: account.ten_dn,
+        role: normalizeRole(account.role),
+      };
+    }
+  } catch (err) {
+    // Token lỗi, hết hạn... Bỏ qua lỗi và không đính kèm req.user
+    console.warn("[loadUserIfAuthenticated] Token không hợp lệ, xử lý như khách vãng lai.");
+  }
+  // Luôn luôn đi tiếp
+  return next();
+}
+// ===== KẾT THÚC PHẦN MỚI =====

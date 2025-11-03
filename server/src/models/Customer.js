@@ -14,8 +14,7 @@ const Customer = sequelize.define(
     ho_ten: DataTypes.STRING(100),
     email:  DataTypes.STRING(100),
     sdt:    DataTypes.STRING(20),
-    dia_chi: DataTypes.STRING(200), // giữ tương thích cũ
-    // ⬇️ mới
+    dia_chi: DataTypes.STRING(200), 
     street:   DataTypes.STRING(200),
     ward:     DataTypes.STRING(100),
     district: DataTypes.STRING(100),
