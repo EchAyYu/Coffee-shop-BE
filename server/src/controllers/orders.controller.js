@@ -16,13 +16,15 @@ const { Order, OrderDetail, Product, Customer, Account, Notification } = db;
 async function pushNoti({ id_tk, type = "order", title, message }) {
   if (!id_tk) return;
   try {
-    // a. Tạo thông báo trong CSDL
+    // a. Tạo thông báo trong CSDL
     const newNotification = await Notification.create({ id_tk, type, title, message });
-    
-    // b. Gửi thông báo real-time qua socket
-    if (newNotification) {
-      emitToUser(id_tk, "new_notification", newNotification.toJSON());
-    }
+    
+    // b. Gửi thông báo real-time qua socket
+    if (newNotification) {
+      // Gửi sự kiện 'new_notification' đến phòng (room) của user_id
+      // Component NotificationBell.jsx (FE) sẽ lắng nghe sự kiện này
+      emitToUser(id_tk, "new_notification", newNotification.toJSON());
+    }
 
   } catch (e) {
     console.error("pushNoti error:", e?.message);
@@ -34,13 +36,13 @@ async function pushNoti({ id_tk, type = "order", title, message }) {
 async function awardPointsIfEligible(order) {
   try {
     if (
-      !order || 
-      order.points_awarded || 
-      (order.trang_thai && order.trang_thai.toLowerCase() !== "completed") || // Sửa lỗi so sánh
-      !order.id_kh
-    ) {
-      return; 
-    }
+      !order || 
+      order.points_awarded || 
+      (order.trang_thai && order.trang_thai.toLowerCase() !== "completed") || // Sửa lỗi so sánh
+      !order.id_kh
+    ) {
+      return; 
+    }
 
     const customer = await Customer.findByPk(order.id_kh);
     if (!customer) return;
@@ -61,7 +63,7 @@ async function awardPointsIfEligible(order) {
     const account = await Account.findByPk(customer.id_tk);
     await pushNoti({
       id_tk: account?.id_tk,
-      type: "loyalty", 
+      type: "loyalty", // Hàm pushNoti giờ sẽ gửi cả socket
       title: `Tích điểm từ đơn #${order.id_don}`,
       message: `Bạn vừa nhận được ${pointsToAdd} điểm. Tổng điểm hiện tại: ${currentPoints + pointsToAdd}.`,
     });
@@ -183,7 +185,7 @@ export async function createOrder(req, res) {
       }
       if (calculatedTotal < Number(voucher.min_order || 0)) {
         return res.status(400).json({ success: false, message: "Chưa đạt giá trị tối thiểu để dùng mã." });
-      }
+D     }
 
       if (voucher.discount_type === "fixed") {
         discount = Number(voucher.discount_value);
@@ -302,11 +304,11 @@ export async function updateOrderStatus(req, res) {
     const { id } = req.params;
     let { trang_thai } = req.body; 
 
-    if (trang_thai) {
-      trang_thai = trang_thai.toLowerCase();
-    } else {
-      return res.status(400).json({ success: false, message: "Trạng thái là bắt buộc." });
-    }
+    if (trang_thai) {
+      trang_thai = trang_thai.toLowerCase();
+    } else {
+      return res.status(400).json({ success: false, message: "Trạng thái là bắt buộc." });
+    }
 
     const order = await Order.findByPk(id);
     if (!order) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
@@ -314,7 +316,7 @@ export async function updateOrderStatus(req, res) {
     const prev = order.trang_thai;
     if (prev === "completed" && trang_thai !== "completed") {
       return res.status(400).json({ success: false, message: "Không thể thay trạng thái đơn đã hoàn thành." });
-    }
+s   }
     if (prev === "cancelled" && trang_thai !== "cancelled") {
       return res.status(400).json({ success: false, message: "Không thể thay trạng thái đơn đã hủy." });
     }
@@ -326,6 +328,7 @@ export async function updateOrderStatus(req, res) {
       const c = await Customer.findByPk(order.id_kh);
       id_tk = c?.id_tk || null;
     }
+    // 🌟 HÀM NÀY GIỜ SẼ GỬI SOCKET 🌟
     await pushNoti({
       id_tk,
       type: "order",
@@ -333,6 +336,7 @@ export async function updateOrderStatus(req, res) {
       message: `Trạng thái mới: ${trang_thai}.`,
     });
 
+    // 🌟 HÀM NÀY GIỜ CŨNG SẼ GỬI SOCKET 🌟
     await awardPointsIfEligible(order); 
 
     res.json({ success: true, message: "Cập nhật trạng thái thành công", data: { id_don: order.id_don, trang_thai: order.trang_thai } });
