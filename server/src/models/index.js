@@ -11,7 +11,8 @@ import Reservation from "./Reservation.js";
 import Customer from "./Customer.js";
 import Account from "./Account.js";
 import Review from "./Reviews.js";
-import Notification from "./Notification.js"; // 💡 THÊM DÒNG NÀY
+import Notification from "./Notification.js"; 
+import ReviewReply from "./ReviewReply.js";
 
 // ===============================
 // 🔗 Thiết lập quan hệ
@@ -49,9 +50,18 @@ Review.belongsTo(Product, { foreignKey: "id_mon" });
 Order.hasMany(Review, { foreignKey: "id_don" });
 Review.belongsTo(Order, { foreignKey: "id_don" });
 
-// (Bạn cũng nên thêm quan hệ cho Notification nếu chưa có)
-// Account.hasMany(Notification, { foreignKey: "id_tk" });
-// Notification.belongsTo(Account, { foreignKey: "id_tk" });
+// --- Thông báo ---
+Account.hasMany(Notification, { foreignKey: "id_tk" });
+Notification.belongsTo(Account, { foreignKey: "id_tk" });
+
+// Mỗi Đánh giá (Review) chỉ có MỘT Phản hồi (ReviewReply)
+Review.hasOne(ReviewReply, { foreignKey: 'id_danh_gia' });
+ReviewReply.belongsTo(Review, { foreignKey: 'id_danh_gia' });
+
+// Mỗi Tài khoản (Account) có thể tạo NHIỀU Phản hồi (ReviewReply)
+Account.hasMany(ReviewReply, { foreignKey: 'id_tk' });
+ReviewReply.belongsTo(Account, { foreignKey: 'id_tk' });
+
 
 // ✅ Xuất toàn bộ
 const db = {
@@ -66,6 +76,7 @@ const db = {
   Account,
   Review,
   Notification, 
+  ReviewReply,
 };
 
 export default db;

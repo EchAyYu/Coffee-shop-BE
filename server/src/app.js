@@ -43,6 +43,7 @@ import homeContentRoutes from "./routes/homeContentRoutes.js";
 import customerProfileRoutes from "./routes/customerProfileRoutes.js";
 import profileRoutes from "./routes/profile.js";
 import Review from "./models/Reviews.js";
+import adminReviewsRouter from "./routes/admin.reviews.js";
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -109,6 +110,8 @@ app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 app.use("/api/admin/orders", adminOrdersRoute);
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
+app.use("/api/admin/orders", requireAuth, authorizeRoles("admin", "employee"), adminOrdersRoute);
+app.use("/api/admin/reviews", requireAuth, authorizeRoles("admin", "employee"), adminReviewsRouter);
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 
