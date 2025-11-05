@@ -1,4 +1,4 @@
-// src/models/Review.js
+// src/models/Review.js (ĐÃ CẬP NHẬT)
 import { DataTypes } from "sequelize";
 import sequelize from "../utils/db.js";
 
@@ -28,7 +28,21 @@ const Review = sequelize.define(
       },
       onDelete: "CASCADE",
     },
-    diem: {
+
+    // ===== 💡 PHẦN MỚI THÊM VÀO =====
+    // Thêm id_don để xác minh người dùng đã mua hàng
+    id_don: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: "don_hang", // Tên bảng (tableName) của Order
+        key: "id_don",
+      },
+      onDelete: "CASCADE", // Xóa đánh giá nếu đơn hàng bị xóa
+    },
+    // ================================
+
+    diem: { // Đây là "xep_hang" (rating)
       type: DataTypes.INTEGER,
       allowNull: false,
       validate: {
@@ -36,7 +50,7 @@ const Review = sequelize.define(
         max: 5,
       },
     },
-    noi_dung: {
+    noi_dung: { // Đây là "binh_luan" (comment)
       type: DataTypes.STRING(250),
       allowNull: true,
     },
@@ -48,6 +62,17 @@ const Review = sequelize.define(
   {
     tableName: "danh_gia",
     timestamps: false,
+    
+    
+    // Đảm bảo không ai có thể đánh giá 1 món 2 lần TRONG CÙNG 1 ĐƠN HÀNG
+    indexes: [
+      {
+        unique: true,
+        fields: ['id_kh', 'id_mon', 'id_don'],
+        name: 'unique_review_per_order_item'
+      }
+    ]
+    // ===================================
   }
 );
 

@@ -1,4 +1,4 @@
-// src/controllers/orders.controller.js (FIX LỖI SOCKET 500)
+// src/controllers/orders.controller.js (ĐÃ THÊM LẠI getOrderById)
 
 import { Op } from "sequelize";
 import sequelize from "../utils/db.js";
@@ -12,7 +12,6 @@ const { Order, OrderDetail, Product, Customer, Account, Notification } = db;
 
 
 // ====== Helper: tạo thông báo ======
-// 💡💡💡 === SỬA LỖI 500 (XÓA 'throw e') === 💡💡💡
 async function pushNoti({ id_tk, type = "order", title, message }) {
   if (!id_tk) return;
   try {
@@ -22,10 +21,9 @@ async function pushNoti({ id_tk, type = "order", title, message }) {
     }
   } catch (e) {
     console.error("pushNoti error:", e?.message);
-    // throw e; // <-- XÓA DÒNG NÀY. Không ném lỗi ra ngoài.
+    // Xóa throw e; (Sửa lỗi 500 khi socket fail)
   }
 }
-// 💡💡💡 ======================================== 💡💡💡
 
 
 // ====== Helper: cộng điểm (chống cộng lặp) ======
@@ -69,20 +67,23 @@ async function awardPointsIfEligible(order) {
     console.log("[awardPoints] ĐÃ CỘNG ĐIỂM THÀNH CÔNG.");
   } catch (e) {
     console.error("awardPointsIfEligible error:", e?.message);
-    throw e; // Giữ throw e ở đây, vì lỗi cộng điểm là nghiêm trọng
+    throw e; 
   }
 }
 
 // ========== Lịch sử đơn của tôi ==========
 export async function getMyOrders(req, res) {
-  // ... (Code này đã OK) ...
   try {
     const page  = Number(req.query.page || 1);
     const limit = Number(req.query.limit || 10);
     const offset = (page - 1) * limit;
 
-    const status = (req.query.status || "completed,cancelled")
+    let status = (req.query.status || "completed,done,cancelled")
       .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+    if (status.includes("completed") && !status.includes("done")) {
+      status.push("done");
+    }
 
     const meAccountId = req.user?.id_tk || req.user?.id;
     const meCustomer = await Customer.findOne({ where: { id_tk: meAccountId } });
@@ -92,7 +93,14 @@ export async function getMyOrders(req, res) {
 
     const { count, rows } = await Order.findAndCountAll({
       where,
-      include: [{ model: OrderDetail, required: false, include: [{ model: Product, attributes: ["id_mon", "ten_mon", "anh"] }] }],
+      include: [{ 
+        model: OrderDetail, 
+        required: true, 
+        include: [{ 
+          model: Product, 
+          attributes: ["id_mon", "ten_mon", "anh"] 
+        }] 
+      }],
       order: [["ngay_dat", "DESC"]],
       limit,
       offset,
@@ -110,11 +118,11 @@ export async function getMyOrders(req, res) {
   }
 }
 
+
 /**
  * 🛒 Tạo đơn hàng
  */
 export async function createOrder(req, res) {
-  // ... (Code này đã OK) ...
   const {
     ho_ten_nhan, sdt_nhan, dia_chi_nhan, email_nhan, pttt, ghi_chu, items,
     voucher_code
@@ -288,14 +296,14 @@ export async function createOrder(req, res) {
   }
 }
 
+// 💡💡💡 === BẮT ĐẦU PHẦN CODE THÊM LẠI === 💡💡💡
 /**
- * 🏷️ Lấy chi tiết đơn
+ * 🏷️ Lấy chi tiết đơn (Fix lỗi crash)
  */
 export async function getOrderById(req, res) {
-  // ... (Code này đã OK) ...
   try {
     const { id } = req.params;
-    const user = req.user;
+    const user = req.user; // Lấy từ requireAuth
 
     const order = await Order.findByPk(id, {
       include: [
@@ -306,27 +314,35 @@ export async function getOrderById(req, res) {
 
     if (!order) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
 
-    const isAdminOrEmployee = user?.role === "admin" || user?.role === "employee";
-    if (!isAdminOrEmployee) {
-      if (!user || !order.id_kh) return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
-      const customerOfUser = await Customer.findOne({ where: { id_tk: user.id_tk } });
-      if (!customerOfUser || customerOfUser.id_kh !== order.id_kh) {
-        return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
-      }
+    // Kiểm tra quyền: Hoặc là admin/employee, hoặc là chủ của đơn hàng
+    const isAdminOrEmployee = user.role === "admin" || user.role === "employee";
+    
+    // Tìm Customer ID của người đang đăng nhập
+    let customerOfUser = null;
+    if (user.role === 'customer') {
+       customerOfUser = await Customer.findOne({ where: { id_tk: user.id_tk }, attributes: ['id_kh'] });
+    }
+    
+    // Nếu không phải admin/employee VÀ (không tìm thấy customer hoặc ID không khớp)
+    if (!isAdminOrEmployee && (!customerOfUser || customerOfUser.id_kh !== order.id_kh)) {
+       return res.status(403).json({ success: false, message: "Không có quyền xem đơn hàng này" });
     }
 
+    // Nếu là admin/employee hoặc là chủ đơn hàng
     res.json({ success: true, data: order });
+    
   } catch (err) {
     console.error(`❌ Lỗi [getOrderById ${req.params.id}]:`, err);
     res.status(500).json({ success: false, message: "Lỗi máy chủ khi lấy chi tiết đơn hàng." });
   }
 }
+// 💡💡💡 === KẾT THÚC PHẦN CODE THÊM LẠI === 💡💡💡
+
 
 /**
  * 🔄 Cập nhật trạng thái (Admin/Employee)
  */
 export async function updateOrderStatus(req, res) {
-  // ... (Code này đã OK) ...
   console.log(`\n--- 🚀 ĐANG CHẠY updateOrderStatus (CONTROLLER MỚI VỚI RELOAD) 🚀 ---`);
 
   try {
@@ -424,7 +440,6 @@ export async function updateOrderStatus(req, res) {
  * 🗑️ Xóa đơn
  */
 export async function deleteOrder(req, res) {
-  // ... (Code này đã OK) ...
   try {
     const { id } = req.params;
 
@@ -447,7 +462,6 @@ export async function deleteOrder(req, res) {
  * 📦 Danh sách đơn hàng (Admin)
  */
 export async function getOrdersAdmin(req, res) {
-  // ... (Code này đã OK) ...
   try {
     const orders = await Order.findAll({
       include: [

@@ -1,3 +1,5 @@
+// src/models/Order.js (ĐÃ CẬP NHẬT ENUM)
+
 import { DataTypes } from "sequelize";
 import sequelize from "../utils/db.js";
 import Customer from "./Customer.js";
@@ -8,13 +10,15 @@ const Order = sequelize.define("Order", {
     autoIncrement: true,
     primaryKey: true,
   },
-  id_kh: { // Thêm FK để liên kết với Customer
+  id_kh: {
     type: DataTypes.INTEGER,
-    allowNull: true, // Cho phép đơn hàng không cần khách hàng đăng nhập (khách vãng lai)
+    allowNull: true, 
     references: {
-      model: Customer,
+      model: Customer, // 💡 Tốt hơn là dùng Model
       key: 'id_kh'
-    }
+    },
+    onDelete: "SET NULL", // 💡 An toàn hơn: nếu xóa khách hàng, giữ lại đơn hàng
+    onUpdate: "CASCADE"
   },
   ho_ten_nhan: {
     type: DataTypes.STRING(100),
@@ -28,32 +32,41 @@ const Order = sequelize.define("Order", {
     type: DataTypes.STRING(200),
     allowNull: false,
   },
-  email_nhan: { // 💡 Thêm trường email người nhận
+  email_nhan: {
     type: DataTypes.STRING(100),
-    allowNull: true, // Có thể không bắt buộc nếu chỉ thanh toán COD
+    allowNull: true,
     validate: {
       isEmail: true,
     }
   },
   pttt: {
-    // 💡 Cập nhật ENUM phương thức thanh toán
     type: DataTypes.ENUM("COD", "BANK_TRANSFER"),
     allowNull: false,
     defaultValue: "COD",
   },
   trang_thai: {
-    // 💡 Cập nhật ENUM trạng thái (thêm chờ thanh toán)
-    type: DataTypes.ENUM("pending", "pending_payment", "confirmed", "completed", "cancelled"),
+    // ===== 💡 SỬA LỖI: THÊM CÁC TRẠNG THÁI CŨ CỦA BẠN VÀO ĐÂY =====
+    type: DataTypes.ENUM(
+      "pending", 
+      "pending_payment", 
+      "confirmed", 
+      "completed", 
+      "cancelled",
+      "done",       // (Trạng thái cũ)
+      "paid",       // (Trạng thái cũ)
+      "shipped"     // (Trạng thái cũ)
+    ),
+    // ========================================================
     defaultValue: "pending",
   },
-  tong_tien: { // 💡 Thêm trường tổng tiền (sẽ tính ở BE)
+  tong_tien: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
     defaultValue: 0.00,
   },
-  ghi_chu: { // 💡 Thêm trường ghi chú (tùy chọn)
-     type: DataTypes.TEXT,
-     allowNull: true,
+  ghi_chu: { 
+      type: DataTypes.TEXT,
+      allowNull: true,
   },
   ngay_dat: {
     type: DataTypes.DATE,
@@ -74,8 +87,6 @@ const Order = sequelize.define("Order", {
   updatedAt: 'ngay_cap_nhat'
 }
 );
-
-
 
 // Quan hệ với Customer (Đã có sẵn)
 Order.belongsTo(Customer, { foreignKey: "id_kh" });

@@ -29,6 +29,16 @@ const Product = sequelize.define("Product", {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
   },
+  rating_avg: {
+    type: DataTypes.DECIMAL(3, 2), // Cho phép lưu 4.50, 3.00, 5.00
+    allowNull: false,
+    defaultValue: 0.00,
+  },
+  rating_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
 }, {
   tableName: "mon",
   timestamps: false,

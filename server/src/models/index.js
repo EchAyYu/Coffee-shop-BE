@@ -10,7 +10,7 @@ import OrderDetail from "./OrderDetail.js";
 import Reservation from "./Reservation.js";
 import Customer from "./Customer.js";
 import Account from "./Account.js";
-import Review from "./Review.js";
+import Review from "./Reviews.js";
 import Notification from "./Notification.js"; // 💡 THÊM DÒNG NÀY
 
 // ===============================
@@ -46,6 +46,8 @@ Customer.hasMany(Review, { foreignKey: "id_kh" });
 Review.belongsTo(Customer, { foreignKey: "id_kh" });
 Product.hasMany(Review, { foreignKey: "id_mon" });
 Review.belongsTo(Product, { foreignKey: "id_mon" });
+Order.hasMany(Review, { foreignKey: "id_don" });
+Review.belongsTo(Order, { foreignKey: "id_don" });
 
 // (Bạn cũng nên thêm quan hệ cho Notification nếu chưa có)
 // Account.hasMany(Notification, { foreignKey: "id_tk" });
@@ -63,7 +65,7 @@ const db = {
   Customer,
   Account,
   Review,
-  Notification, // 💡 THÊM DÒNG NÀY
+  Notification, 
 };
 
 export default db;

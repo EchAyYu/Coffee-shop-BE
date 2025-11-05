@@ -1,6 +1,4 @@
-// ===============================
-// ☕ Coffee Shop Backend - App.js
-// ===============================
+// src/app.js (ĐÃ CẬP NHẬT ĐỂ ĐỒNG BỘ CSDL)
 
 import express from "express";
 import cors from "cors";
@@ -19,7 +17,7 @@ import { initSocket } from "./socket.js";
 
 // --- Config & Utils ---
 import { config } from "./config/config.js";
-import sequelize from "./utils/db.js";
+import sequelize from "./utils/db.js"; // 💡 SEQUELIZE IMPORT
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 import { swaggerDocs } from "./config/swagger.js";
 
@@ -44,31 +42,16 @@ import tablesRouter from "./routes/tables.js";
 import homeContentRoutes from "./routes/homeContentRoutes.js";
 import customerProfileRoutes from "./routes/customerProfileRoutes.js";
 import profileRoutes from "./routes/profile.js";
-
-// Các route “có thể có” (optional) sẽ import động phía dưới:
-//  - ./routes/loyalty.js
-//  - ./routes/vouchers.js
-//  - ./routes/voucherRedemptions.js
-//  - ./routes/notifications.js
+import Review from "./models/Reviews.js";
 
 // --- Khởi tạo Express ---
 const app = express();
-
-// Cho reverse proxy (Render, Vercel, Heroku...) hiểu IP thật của client
 app.set("trust proxy", 1);
 
 // ===============================
 // 🧩 GLOBAL MIDDLEWARES
 // ===============================
-
-// Bảo mật header
-app.use(
-  helmet({
-    crossOriginResourcePolicy: false, // Cho phép ảnh (Cloudinary,...)
-  })
-);
-
-// Logger khi dev
+app.use(helmet({ crossOriginResourcePolicy: false }));
 if (config.env === "development") {
   app.use(morgan("dev"));
 }
@@ -84,16 +67,15 @@ const ALLOW_ORIGINS = [
   "http://localhost:3000",
 ].filter(Boolean);
 
-// ✅ Cho phép FE gửi cookie & header Authorization
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true); // Cho phép Postman, Swagger
+      if (!origin) return callback(null, true); 
       if (ALLOW_ORIGINS.includes(origin)) return callback(null, true);
       console.warn("❌ Blocked by CORS:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
-    credentials: true, // BẮT BUỘC để gửi cookie giữa FE <-> BE
+    credentials: true, 
   })
 );
 
@@ -111,75 +93,55 @@ app.use("/api/", globalLimiter);
 // ===============================
 // 🚀 ROUTES BẮT BUỘC
 // ===============================
-
-// Auth
 app.use("/api/auth", authRouter);
-
-// Public routes
 app.use("/api/products", productsRouter);
 app.use("/api/categories", categoriesRouter);
-app.use("/api/reviews", reviewsRouter);
+app.use("/api/reviews", reviewsRouter); 
 app.use("/api/stats", statsRouter);
 app.use("/api/tables", tablesRouter);
 app.use("/api/home-content", homeContentRoutes);
 app.use("/api/customer-profile", customerProfileRoutes);
 app.use("/api/profile", profileRoutes);
-
-// Private user routes
 app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
 app.use("/api/customers", customersRouter);
-
-// Employee / Admin routes
 app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 app.use("/api/admin/orders", adminOrdersRoute);
-
-// Dashboard quản trị (JWT + ADMIN)
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
-
-// Health check
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
 
 // ===============================
 // 📦 ROUTES TÙY CHỌN (IMPORT ĐỘNG)
 // ===============================
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-/**
- * Mount một route nếu file module tồn tại.
- * @param {string} urlPrefix - prefix URL, vd: "/api/voucher-redemptions"
- * @param {string} relModulePath - đường dẫn module tương đối tới app.js, vd: "./routes/voucherRedemptions.js"
- * @param {Array<Function>} middlewares - danh sách middleware áp trước router
- */
 async function mountIfExists(urlPrefix, relModulePath, middlewares = []) {
+  // ... (Giữ nguyên hàm này) ...
   const absPath = path.resolve(__dirname, relModulePath.replace("./", ""));
-  if (!fs.existsSync(absPath)) {
-    console.warn(`ℹ️  Route file not found, skip mounting: ${relModulePath}`);
-    return;
-  }
-  try {
-    const mod = await import(relModulePath);
-    const router = mod.default;
-    if (!router) {
-      console.warn(`ℹ️  Route "${relModulePath}" không export default, bỏ qua.`);
-      return;
-    }
-    if (middlewares.length) {
-      app.use(urlPrefix, ...middlewares, router);
-    } else {
-      app.use(urlPrefix, router);
-    }
-    console.log(`✅ Mounted route ${urlPrefix} from ${relModulePath}`);
-  } catch (e) {
-    console.error(`❌ Lỗi import route ${relModulePath}:`, e?.message || e);
-  }
+  if (!fs.existsSync(absPath)) {
+    console.warn(`ℹ️  Route file not found, skip mounting: ${relModulePath}`);
+    return;
+  }
+  try {
+    const mod = await import(relModulePath);
+    const router = mod.default;
+    if (!router) {
+      console.warn(`ℹ️  Route "${relModulePath}" không export default, bỏ qua.`);
+      return;
+    }
+    if (middlewares.length) {
+      app.use(urlPrefix, ...middlewares, router);
+    } else {
+      app.use(urlPrefix, router);
+    }
+    console.log(`✅ Mounted route ${urlPrefix} from ${relModulePath}`);
+  } catch (e) {
+    console.error(`❌ Lỗi import route ${relModulePath}:`, e?.message || e);
+  }
 }
-
-// Gắn các route optional (nếu có file)
-await mountIfExists("/api/loyalty", "./routes/loyalty.js"); // nếu bạn đã tạo
+await mountIfExists("/api/loyalty", "./routes/loyalty.js"); 
 await mountIfExists("/api/vouchers", "./routes/vouchers.js", [requireAuth, authorizeRoles("customer")]);
 await mountIfExists("/api/voucher-redemptions", "./routes/voucherRedemptions.js", [requireAuth, authorizeRoles("customer")]);
 await mountIfExists("/api/notifications", "./routes/notifications.js", [requireAuth]);
@@ -198,33 +160,33 @@ app.use(errorHandler);
 // ===============================
 // 🔌 START SERVER FUNCTION
 // ===============================
-
-// 🌟 2. CẬP NHẬT HÀM START SERVER 🌟
 export const startServer = async () => {
-  const PORT = config.port || 4000;
+  const PORT = config.port || 4000;
 
-  try {
-    await sequelize.authenticate();
-    console.log("✅ Connected to MySQL successfully!");
+  try {
+    await sequelize.authenticate();
+    console.log("✅ Connected to MySQL successfully!");
 
-    // 💡 Tạo HTTP server từ app Express
+    // ===== 💡 DÒNG MỚI ĐỂ CẬP NHẬT CSDL TỰ ĐỘNG =====
+    // Nó sẽ 'ALTER TABLE' để thêm id_don, rating_avg, rating_count
+    await sequelize.sync({ alter: true });
+    console.log("✅ Database synced (alter: true)");
+    // =================================================
+
     const httpServer = http.createServer(app);
-
-    // 💡 Khởi tạo Socket.io VỚI http server
     initSocket(httpServer, ALLOW_ORIGINS);
 
-    // 💡 Chạy httpServer.listen THAY VÌ app.listen
-    httpServer.listen(PORT, () => {
-      console.log(`☕ Server is running on http://localhost:${PORT}`);
+    httpServer.listen(PORT, () => {
+      console.log(`☕ Server is running on http://localhost:${PORT}`);
       console.log(`🔌 Socket.io initialized.`);
-      console.log(`🌐 Allowed Origins: ${ALLOW_ORIGINS.join(", ")}`);
-    });
+      console.log(`🌐 Allowed Origins: ${ALLOW_ORIGINS.join(", ")}`);
+    });
 
-  } catch (err) {
-    console.error("❌ Database connection error:", err);
-  }
+  } catch (err) {
+    console.error("❌ Database connection error:", err);
+  }
 };
 
 export default app;
-startServer();
 
+startServer();
