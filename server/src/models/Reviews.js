@@ -54,6 +54,14 @@ const Review = sequelize.define(
       type: DataTypes.STRING(250),
       allowNull: true,
     },
+    likes: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0
+    },
+    dislikes: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0
+    },
     ngay_dg: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,

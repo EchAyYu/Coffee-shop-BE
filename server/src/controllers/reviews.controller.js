@@ -2,10 +2,11 @@
 
 import db from "../models/index.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import sequelize from "../utils/db.js";      // ⬅️ default import
-import { Op } from "sequelize";               // ⬅️ import Op chuẩn
+import sequelize from "../utils/db.js";
+import { Op } from "sequelize";
 
-const { Review, Customer, Order, OrderDetail, Product } = db;
+// 💡 SỬA ĐỔI: Thêm 'ReviewReply' vào danh sách import
+const { Review, Customer, Order, OrderDetail, Product, ReviewReply } = db;
 
 /** Cập nhật rating trung bình cho món */
 async function updateProductRating(id_mon, transaction) {
@@ -82,7 +83,15 @@ export const getProductReviews = asyncHandler(async (req, res) => {
 
   const reviews = await Review.findAll({
     where: { id_mon },
-    include: [{ model: Customer, attributes: ["ho_ten", "anh"] }],
+    include: [
+      // 💡 SỬA ĐỔI: Giữ lại Customer
+      { model: Customer, attributes: ["ho_ten", "anh"] },
+      
+      // 💡 SỬA ĐỔI: Thêm 'ReviewReply'
+      // Giả sử model Phản hồi của bạn tên là 'ReviewReply'
+      // và nó đã được associate (Review.hasOne(ReviewReply))
+      { model: ReviewReply }
+    ],
     order: [["ngay_dg", "DESC"]],
   });
 
@@ -114,7 +123,7 @@ export const getReviewStatusForOrder = asyncHandler(async (req, res) => {
     where: {
       id_kh: customer.id_kh,
       id_don,
-      id_mon: { [Op.in]: productIds },   // ⬅️ dùng Op.in
+      id_mon: { [Op.in]: productIds },
     },
     attributes: ["id_mon"],
     raw: true,
@@ -125,4 +134,28 @@ export const getReviewStatusForOrder = asyncHandler(async (req, res) => {
   for (const pid of productIds) statusMap[pid] = reviewed.has(pid);
 
   return res.status(200).json({ success: true, data: statusMap });
+});
+
+
+// 💡 TÍNH NĂNG MỚI: Like/Dislike 💡
+
+/** POST /api/reviews/:id_dg/like */
+export const likeReview = asyncHandler(async (req, res) => {
+  const { id_dg } = req.params;
+  
+  // (Chúng ta sẽ bỏ qua logic phức tạp như "user chỉ like 1 lần")
+  // Tăng cột 'likes' lên 1
+  await Review.increment('likes', { where: { id_dg } });
+  
+  res.status(200).json({ success: true, message: "Đã thích đánh giá." });
+});
+
+/** POST /api/reviews/:id_dg/dislike */
+export const dislikeReview = asyncHandler(async (req, res) => {
+  const { id_dg } = req.params;
+
+  // Tăng cột 'dislikes' lên 1
+  await Review.increment('dislikes', { where: { id_dg } });
+
+  res.status(200).json({ success: true, message: "Đã không thích đánh giá." });
 });

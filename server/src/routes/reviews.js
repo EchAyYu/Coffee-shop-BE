@@ -9,6 +9,8 @@ import {
   createReview,
   getProductReviews,
   getReviewStatusForOrder,
+  likeReview,       
+  dislikeReview
 } from "../controllers/reviews.controller.js"; 
 
 const router = express.Router();
@@ -138,5 +140,8 @@ router.get(
   validate,
   asyncHandler(getReviewStatusForOrder)
 );
+
+router.post('/:id_dg/like', requireAuth, likeReview);
+router.post('/:id_dg/dislike', requireAuth, dislikeReview);
 
 export default router;
