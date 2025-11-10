@@ -54,6 +54,7 @@ import {
   updateVoucher,
   deleteVoucher
 } from "../controllers/voucher.controller.js";
+import { getAdminStats } from "../controllers/admin.stats.controller.js";
 // Middleware: chỉ admin mới vào được
 r.use(requireAuth, requireAdmin);
 
@@ -109,4 +110,7 @@ r.get("/vouchers", asyncHandler(getAllVouchersAdmin));
 r.post("/vouchers", asyncHandler(createVoucher));
 r.put("/vouchers/:id", asyncHandler(updateVoucher));
 r.delete("/vouchers/:id", asyncHandler(deleteVoucher));
+
+// Thống kê Admin
+r.get("/stats", asyncHandler(getAdminStats));
 export default r;
