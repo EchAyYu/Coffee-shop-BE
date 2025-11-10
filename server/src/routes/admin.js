@@ -1,6 +1,6 @@
 import { Router } from "express";
 const r = Router();
-
+import { asyncHandler } from "../utils/asyncHandler.js";
 import { requireAuth, requireAdmin, authorizeRoles } from "../middlewares/authMiddleware.js";
 
 import {
@@ -48,7 +48,12 @@ import {
   updateReservationStatus,
   deleteReservation,
 } from "../controllers/reservations.controller.js";
-
+import {
+  createVoucher,
+  getAllVouchersAdmin,
+  updateVoucher,
+  deleteVoucher
+} from "../controllers/voucher.controller.js";
 // Middleware: chỉ admin mới vào được
 r.use(requireAuth, requireAdmin);
 
@@ -97,4 +102,11 @@ r.get("/reservations", getAllReservations);
 r.put("/reservations/:id", updateReservationStatus);
 r.delete("/reservations/:id", deleteReservation);
 
+
+//QUẢN LÝ VOUCHER (Admin)
+// =====================
+r.get("/vouchers", asyncHandler(getAllVouchersAdmin));
+r.post("/vouchers", asyncHandler(createVoucher));
+r.put("/vouchers/:id", asyncHandler(updateVoucher));
+r.delete("/vouchers/:id", asyncHandler(deleteVoucher));
 export default r;

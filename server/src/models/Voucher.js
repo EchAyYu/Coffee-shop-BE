@@ -16,6 +16,8 @@ const Voucher = sequelize.define(
     expires_at:    { type: DataTypes.DATE, allowNull: true },
     active:        { type: DataTypes.BOOLEAN, defaultValue: true },
     created_at:    { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    total_quantity: { type: DataTypes.INTEGER, allowNull: true }, 
+    redeemed_count: { type: DataTypes.INTEGER, defaultValue: 0 },
   },
   { tableName: "vouchers", timestamps: false }
 );
