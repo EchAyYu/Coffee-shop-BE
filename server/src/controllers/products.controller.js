@@ -4,18 +4,27 @@ import { Op } from "sequelize";
 // Lấy tất cả sản phẩm
 export async function getAllProducts(req, res) {
   try {
-    const { q, category } = req.query;
+    // Lấy các tham số từ query string
+    const { q, category, status } = req.query;
+    
     const where = {};
 
+    // 1. Lọc theo tên sản phẩm (Search)
     if (q) {
       where.ten_mon = { [Op.like]: `%${q}%` };
     }
+    // 2. Lọc theo danh mục
     if (category) {
-      where.id_dm = category; // category = id_dm
+      where.id_dm = category;
     }
+    // 3. 💡 LỌC MỚI: Lọc theo trạng thái
+    if (status === 'true' || status === 'false') {
+      where.trang_thai = (status === 'true');
+    }
+    // (Nếu status là "" hoặc không có, nó sẽ bỏ qua và lấy tất cả)
 
     const products = await Product.findAll({ where });
-    res.json(products);
+    res.json(products); // 💡 File adminApi.js của bạn đã được thiết kế để nhận 'res.json(products)'
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -49,7 +58,7 @@ export async function createProduct(req, res) {
       ten_mon,
       gia,
       mo_ta,
-      anh, // 💡 Dùng trực tiếp 'anh' (URL) từ req.body
+      anh, 
       trang_thai,
     });
 
