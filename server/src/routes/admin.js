@@ -2,7 +2,7 @@ import { Router } from "express";
 const r = Router();
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { requireAuth, requireAdmin, authorizeRoles } from "../middlewares/authMiddleware.js";
-
+import { uploadWithErrorHandler } from "../middlewares/uploadMiddleware.js";
 import {
   getAllCustomers,
   getCustomerById,
@@ -17,11 +17,11 @@ import {
   deleteOrder,
 } from "../controllers/orders.controller.js";
 import {
-  getAllProducts,
-  getProductById,
-  createProduct,
-  updateProduct,
-  deleteProduct
+  getAllProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct
 } from "../controllers/products.controller.js";
 import {
   getAllCategories,
@@ -68,8 +68,19 @@ r.delete("/customers/:id", deleteCustomer);
 // Quản lý sản phẩm
 r.get("/products", getAllProducts);
 r.get("/products/:id", getProductById);
-r.post("/products", createProduct);
-r.put("/products/:id", updateProduct);
+
+r.post(
+  "/products", 
+  uploadWithErrorHandler, 
+  asyncHandler(createProduct)
+);
+
+r.put(
+  "/products/:id", 
+  uploadWithErrorHandler, 
+  asyncHandler(updateProduct)
+);
+
 r.delete("/products/:id", deleteProduct);
 
 // Quản lý đơn hàng
@@ -104,8 +115,8 @@ r.put("/reservations/:id", updateReservationStatus);
 r.delete("/reservations/:id", deleteReservation);
 
 
-//QUẢN LÝ VOUCHER (Admin)
-// =====================
+// QUẢN LÝ VOUCHER (Admin)
+
 r.get("/vouchers", asyncHandler(getAllVouchersAdmin));
 r.post("/vouchers", asyncHandler(createVoucher));
 r.put("/vouchers/:id", asyncHandler(updateVoucher));
