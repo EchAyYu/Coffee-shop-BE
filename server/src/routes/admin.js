@@ -2,7 +2,7 @@ import { Router } from "express";
 const r = Router();
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { requireAuth, requireAdmin, authorizeRoles } from "../middlewares/authMiddleware.js";
-import { uploadWithErrorHandler } from "../middlewares/uploadMiddleware.js";
+
 import {
   getAllCustomers,
   getCustomerById,
@@ -68,18 +68,8 @@ r.delete("/customers/:id", deleteCustomer);
 // Quản lý sản phẩm
 r.get("/products", getAllProducts);
 r.get("/products/:id", getProductById);
-
-r.post(
-  "/products", 
-  uploadWithErrorHandler, 
-  asyncHandler(createProduct)
-);
-
-r.put(
-  "/products/:id", 
-  uploadWithErrorHandler, 
-  asyncHandler(updateProduct)
-);
+r.post("/products", asyncHandler(createProduct));
+r.put("/products/:id", asyncHandler(updateProduct));
 
 r.delete("/products/:id", deleteProduct);
 

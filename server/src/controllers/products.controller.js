@@ -37,7 +37,9 @@ export async function getProductById(req, res) {
 // ✅ Thêm sản phẩm mới
 export async function createProduct(req, res) {
   try {
-    const { id_dm, ten_mon, gia, mo_ta, anh, trang_thai } = req.body;
+    // Quay lại dùng req.body
+    const { id_dm, ten_mon, gia, mo_ta, anh, trang_thai } = req.body; 
+    
     if (!id_dm || !ten_mon || !gia) {
       return res.status(400).json({ message: "Thiếu thông tin bắt buộc" });
     }
@@ -47,13 +49,13 @@ export async function createProduct(req, res) {
       ten_mon,
       gia,
       mo_ta,
-      anh,
+      anh, // 💡 Dùng trực tiếp 'anh' (URL) từ req.body
       trang_thai,
     });
 
     res.status(201).json(newProduct);
   } catch (err) {
-    console.error(err);
+    console.error("Lỗi khi tạo sản phẩm:", err);
     res.status(500).json({ message: "Server error" });
   }
 }
@@ -65,10 +67,11 @@ export async function updateProduct(req, res) {
     const product = await Product.findByPk(req.params.id);
     if (!product) return res.status(404).json({ message: "Not found" });
 
-    await product.update(req.body);
+    await product.update(req.body); 
+    
     res.json(product);
   } catch (err) {
-    console.error(err);
+    console.error("Lỗi khi cập nhật sản phẩm:", err);
     res.status(500).json({ message: "Server error" });
   }
 }
