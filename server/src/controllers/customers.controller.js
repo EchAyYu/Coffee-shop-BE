@@ -1,47 +1,53 @@
-// server/src/controllers/customers.controller.js
 import { Op } from "sequelize";
 import Account from "../models/Account.js";
 import Customer from "../models/Customer.js";
 
-// GET /api/admin/customers?q=&page=&limit=
+// GET /api/admin/customers?q=&page=&limit=&province=
 export async function getAllCustomers(req, res) {
-  try {
-    const { q, page = 1, limit = 20 } = req.query;
-    const where = {};
+  try {
+    // 💡 SỬA ĐỔI: Thay 'province' bằng 'district'
+    const { q, page = 1, limit = 20, district } = req.query;
+    const where = {};
 
-    if (q) {
-      where[Op.or] = [
-        { ho_ten: { [Op.like]: `%${q}%` } },
-        { email: { [Op.like]: `%${q}%` } },
-        { sdt: { [Op.like]: `%${q}%` } },
-      ];
+    if (q) {
+      where[Op.or] = [
+        { ho_ten: { [Op.like]: `%${q}%` } },
+        { email: { [Op.like]: `%${q}%` } },
+        { sdt: { [Op.like]: `%${q}%` } },
+      ];
+    }
+
+    // 💡 SỬA ĐỔI: Thêm logic lọc (Filter) theo Quận/Huyện
+    if (district) {
+      // Giả sử trường trong CSDL của bạn là 'district'
+      where.district = district; 
     }
 
-    const offset = (Number(page) - 1) * Number(limit);
+    const offset = (Number(page) - 1) * Number(limit);
 
-    const { rows, count } = await Customer.findAndCountAll({
-      where,
-      include: [
-        {
-          model: Account,
-          attributes: ["id_tk", "ten_dn", "role"],
-        },
-      ],
-      order: [["id_kh", "DESC"]],
-      limit: Number(limit),
-      offset,
-    });
+    const { rows, count } = await Customer.findAndCountAll({
+      where,
+      include: [
+        {
+          model: Account,
+          attributes: ["id_tk", "ten_dn", "role"],
+        },
+      ],
+      order: [["id_kh", "DESC"]],
+      limit: Number(limit),
+      offset,
+    });
 
-    res.json({
-      total: count,
-      page: Number(page),
-      limit: Number(limit),
-      data: rows,
-    });
-  } catch (e) {
-    console.error("[getAllCustomers]", e);
-    res.status(500).json({ message: "Server error" });
-  }
+    res.json({
+      total: count,
+      page: Number(page),
+      limit: Number(limit),
+      data: rows,
+    });
+  } catch (e) {
+    console.error("[getAllCustomers]", e);
+    res.status(500).json({ message: "Server error" });
+  }
 }
 
 // GET /api/admin/customers/:id
