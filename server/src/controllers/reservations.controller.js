@@ -4,47 +4,80 @@
 import Reservation from "../models/Reservation.js";
 import Customer from "../models/Customer.js";
 import Table from "../models/Table.js";
-/**
- * 📅 Khách hàng tạo đặt bàn
- */
-export async function createReservation(req, res) {
+import Notification from "../models/Notification.js"; // 💡 THÊM IMPORT
+import { emitToUser } from "../socket.js";            // 💡 THÊM IMPORT
+
+// 💡 --- Helper Function: Hàm gửi thông báo (Nội bộ) ---
+async function sendReservationNotification(reservation, newStatusLabel) {
   try {
-    const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu } = req.body;
+    if (!reservation.id_kh) return; // Không có khách hàng, không gửi
 
-    // 🔹 Kiểm tra tài khoản có tồn tại trong bảng khách hàng
-   const customer = await Customer.findOne({ where: { id_tk: req.user.id_tk } });
-    if (!customer) {
-      return res.status(400).json({
-        success: false,
-        message: "Không tìm thấy khách hàng cho tài khoản này",
-      });
-    }
+    const customer = await Customer.findByPk(reservation.id_kh);
+    if (!customer || !customer.id_tk) return; // Không tìm thấy tài khoản
 
-    // 🔹 Tạo đặt bàn mới
-   const newR = await Reservation.create({
-      id_kh: customer.id_kh,
-      ho_ten,
-      sdt,
-      ngay_dat,
-      gio_dat, // 💡 THÊM DÒNG NÀY
-      so_nguoi,
-      ghi_chu,
-      trang_thai: "PENDING",
+    const title = `Đặt bàn #${reservation.id_datban} ${newStatusLabel}`;
+    const message = `Yêu cầu đặt bàn của bạn (ID: #${reservation.id_datban}) đã được ${newStatusLabel.toLowerCase()}.`;
+
+    // 1. Tạo thông báo trong CSDL
+    const newNotification = await Notification.create({
+      id_tk: customer.id_tk,
+      type: "reservation", // 💡 Ghi rõ type là 'reservation'
+      title: title,
+      message: message,
     });
 
-   res.status(201).json({
-      success: true,
-      message: "Đặt bàn thành công",
-      reservation: newR,
-    });
-  } catch (err) {
-    console.error("❌ Lỗi tạo đặt bàn:", err);
-    res.status(500).json({
-      success: false,
-      message: "Lỗi tạo đặt bàn",
-      error: err.message,
-    });
+    // 2. Bắn sự kiện Socket
+    emitToUser(customer.id_tk, "new_notification", newNotification.toJSON());
+    
+    console.log(`[Socket] Đã gửi thông báo đặt bàn cho id_tk: ${customer.id_tk}`);
+
+  } catch (e) {
+    console.error("Lỗi khi gửi thông báo đặt bàn:", e.message);
+    // Không ném lỗi ra ngoài để tránh làm hỏng API chính
   }
+}
+/**
+ * 📅 Khách hàng tạo đặt bàn
+ */
+// ... (Hàm createReservation của bạn giữ nguyên)
+export async function createReservation(req, res) {
+  // ... (Code cũ của bạn giữ nguyên)
+  try {
+    const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu, id_ban } = req.body; // 💡 Đảm bảo 'id_ban' được gửi từ FE
+
+    const customer = await Customer.findOne({ where: { id_tk: req.user.id_tk } });
+    if (!customer) {
+      return res.status(400).json({
+        success: false,
+        message: "Không tìm thấy khách hàng cho tài khoản này",
+      });
+    }
+
+    const newR = await Reservation.create({
+      id_kh: customer.id_kh,
+      id_ban: id_ban, // 💡 Gán id_ban
+      ho_ten,
+      sdt,
+      ngay_dat,
+      gio_dat,
+      so_nguoi,
+      ghi_chu,
+      trang_thai: "PENDING",
+    });
+
+   res.status(201).json({
+      success: true,
+      message: "Đặt bàn thành công",
+      reservation: newR,
+    });
+  } catch (err) {
+    console.error("❌ Lỗi tạo đặt bàn:", err);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi tạo đặt bàn",
+      error: err.message,
+    });
+  }
 }
 
 /**
@@ -136,22 +169,41 @@ export async function getReservationById(req, res) {
 }
 
 /**
- * 🛠️ Admin cập nhật trạng thái
- */
+ * 🛠️ Admin cập nhật trạng thái
+ */
 export async function updateReservationStatus(req, res) {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-    const reservation = await Reservation.findByPk(id);
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // status nhận vào là "CONFIRMED", "CANCELLED"...
+    const reservation = await Reservation.findByPk(id);
 
-    if (!reservation)
-      return res.status(404).json({ success: false, message: "Không tìm thấy" });
+    if (!reservation)
+      return res.status(404).json({ success: false, message: "Không tìm thấy" });
 
-    await reservation.update({ trang_thai: status });
-    res.json({ success: true, message: "Cập nhật thành công", data: reservation });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi cập nhật", error: err.message });
-  }
+    // Chỉ gửi thông báo nếu trạng thái thực sự thay đổi
+    const oldStatus = reservation.trang_thai;
+    if (oldStatus === status) {
+       return res.json({ success: true, message: "Trạng thái không đổi", data: reservation });
+    }
+
+    await reservation.update({ trang_thai: status });
+
+    // 💡💡💡 LOGIC GỬI THÔNG BÁO MỚI 💡💡💡
+    let statusLabel = "";
+    if (status === "CONFIRMED") statusLabel = "Đã xác nhận";
+    if (status === "CANCELLED") statusLabel = "Đã hủy";
+    if (status === "DONE") statusLabel = "Đã hoàn thành";
+
+    if (statusLabel) {
+      // Chạy bất đồng bộ, không cần await để API trả về nhanh
+      sendReservationNotification(reservation, statusLabel);
+    }
+    // 💡💡💡 KẾT THÚC LOGIC MỚI 💡💡💡
+
+    res.json({ success: true, message: "Cập nhật thành công", data: reservation });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Lỗi cập nhật", error: err.message });
+  }
 }
 
 /**
