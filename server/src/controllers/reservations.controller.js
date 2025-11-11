@@ -3,7 +3,7 @@
 // ================================
 import Reservation from "../models/Reservation.js";
 import Customer from "../models/Customer.js";
-
+import Table from "../models/Table.js";
 /**
  * 📅 Khách hàng tạo đặt bàn
  */
@@ -78,19 +78,58 @@ export async function getMyReservations(req, res) {
 }
 
 /**
- * 🧾 Admin xem toàn bộ đơn
- */
+ * 🧾 Admin xem toàn bộ đơn
+ */
 export async function getAllReservations(req, res) {
+  try {
+    const reservations = await Reservation.findAll({
+      // 💡 CẬP NHẬT INCLUDE: Thêm 'Table'
+      include: [
+        { 
+          model: Customer, 
+          attributes: ['id_kh', 'ho_ten'] // Lấy ít trường hơn cho nhẹ
+        },
+        {
+          model: Table,
+          attributes: ['id_ban', 'ten_ban', 'so_ban'] // Lấy tên bàn
+        }
+      ],
+      order: [["ngay_dat", "DESC"]],
+    });
+    res.json({ success: true, data: reservations });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Lỗi lấy danh sách đặt bàn",
+      error: err.message,
+    });
+  }
+}
+
+// 💡💡💡 THÊM HÀM MỚI 💡💡💡
+/**
+ * ℹ️ Admin xem chi tiết 1 đơn
+ */
+export async function getReservationById(req, res) {
   try {
-    const reservations = await Reservation.findAll({
-      include: [{ model: Customer }],
-      order: [["ngay_dat", "DESC"]],
+    const { id } = req.params;
+    const reservation = await Reservation.findByPk(id, {
+      // Include đầy đủ thông tin cho Modal
+      include: [
+        { model: Customer }, // Lấy tất cả thông tin Customer
+        { model: Table }      // Lấy tất cả thông tin Table
+      ]
     });
-    res.json({ success: true, data: reservations });
+
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy đơn đặt bàn" });
+    }
+
+    res.json({ success: true, data: reservation });
   } catch (err) {
     res.status(500).json({
       success: false,
-      message: "Lỗi lấy danh sách đặt bàn",
+      message: "Lỗi lấy chi tiết đặt bàn",
       error: err.message,
     });
   }

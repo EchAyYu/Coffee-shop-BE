@@ -4,6 +4,7 @@ import {
   createReservation,
   getMyReservations,
   getAllReservations,
+  getReservationById,
   updateReservationStatus,
   deleteReservation,
 } from "../controllers/reservations.controller.js";
@@ -144,6 +145,24 @@ router.delete(
   authorizeRoles("admin"),
   [param("id").isInt().toInt()],
   asyncHandler(deleteReservation)
+);
+
+// 💡💡💡 THÊM ROUTE MỚI 💡💡💡
+/**
+ * @swagger
+ * /api/reservations/{id}:
+ *   get:
+ *     summary: Xem chi tiết đặt bàn (admin)
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get(
+  "/:id",
+  requireAuth,
+  authorizeRoles("admin"),
+  [param("id").isInt().toInt()],
+  asyncHandler(getReservationById)
 );
 
 export default router;
