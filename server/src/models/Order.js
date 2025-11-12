@@ -54,7 +54,8 @@ const Order = sequelize.define("Order", {
       "cancelled",
       "done",       // (Trạng thái cũ)
       "paid",       // (Trạng thái cũ)
-      "shipped"     // (Trạng thái cũ)
+      "shipped",     // (Trạng thái cũ)
+      "PREORDER"
     ),
     // ========================================================
     defaultValue: "pending",
