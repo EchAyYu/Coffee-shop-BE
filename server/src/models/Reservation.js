@@ -2,7 +2,8 @@
 import { DataTypes } from "sequelize";
 import sequelize from "../utils/db.js";
 import Customer from "./Customer.js";
-import Table from "./Table.js"; // 💡 THÊM IMPORT
+import Table from "./Table.js"; 
+import Order from "./Order.js";
 
 const Reservation = sequelize.define("Reservation", {
   id_datban: {
@@ -37,7 +38,7 @@ const Reservation = sequelize.define("Reservation", {
     type: DataTypes.DATE,
     allowNull: false,
   },
-  // 💡 TÔI CŨNG THÊM gio_dat VÀO ĐÂY (VÌ BẠN CÓ TRONG CONTROLLER)
+
   gio_dat: {
     type: DataTypes.TIME,
     allowNull: true,
@@ -53,6 +54,16 @@ const Reservation = sequelize.define("Reservation", {
     type: DataTypes.ENUM("PENDING", "CONFIRMED", "CANCELLED", "DONE"),
     defaultValue: "PENDING",
   },
+id_don_dat_truoc: {
+    type: DataTypes.INTEGER,
+    allowNull: true, // Cho phép NULL (vì khách có thể không đặt món)
+    references: {
+      model: Order,
+      key: 'id_don'
+    },
+    onDelete: "SET NULL", // Nếu xóa Order, chỉ set null chứ không xóa Reservation
+    onUpdate: "CASCADE"
+  }
 }, {
   tableName: "dat_ban",
   timestamps: false, // Giữ nguyên như file gốc của bạn
@@ -65,5 +76,15 @@ Customer.hasMany(Reservation, { foreignKey: "id_kh" });
 // 💡💡💡 THÊM QUAN HỆ VỚI BÀN 💡💡💡
 Reservation.belongsTo(Table, { foreignKey: "id_ban" });
 Table.hasMany(Reservation, { foreignKey: "id_ban" });
+
+// 💡💡💡 THÊM QUAN HỆ VỚI ORDER (ĐỂ SỬA LỖI 500 CỦA ADMIN) 💡💡💡
+Reservation.belongsTo(Order, { 
+  foreignKey: "id_don_dat_truoc", 
+  as: "PreOrder" // 👈 'as' này RẤT QUAN TRỌNG, phải khớp với controller
+});
+Order.hasOne(Reservation, { 
+  foreignKey: "id_don_dat_truoc",
+  as: "Reservation"
+});
 
 export default Reservation;
