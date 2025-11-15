@@ -16,7 +16,7 @@ const VoucherRedemption = sequelize.define(
     type: DataTypes.STRING(40),
     // unique: true, // Đảm bảo bạn đã comment dòng này
     allowNull: false,
-  },
+    },
     status: {
       type: DataTypes.ENUM("active", "used", "expired", "cancelled"),
       defaultValue: "active",
