@@ -7,12 +7,12 @@ const Table = sequelize.define("Table", {
     autoIncrement: true,
     primaryKey: true,
   },
-  so_ban: {
-    type: DataTypes.STRING(20),
-    allowNull: false,
-    unique: true,
-    comment: "Số bàn, VD: B01, B02, VIP-01"
-  },
+so_ban: {
+    type: DataTypes.STRING(20),
+    // unique: true, // Đã comment lại, vì DB đã có key này rồi
+    allowNull: false,
+    comment: 'Số bàn, VD: B01, B02, VIP-01'
+  },
   ten_ban: {
     type: DataTypes.STRING(100),
     allowNull: true,

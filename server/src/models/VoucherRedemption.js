@@ -12,7 +12,11 @@ const VoucherRedemption = sequelize.define(
       references: { model: Voucher, key: "id" },
     },
     id_tk: { type: DataTypes.INTEGER, allowNull: false },
-    code: { type: DataTypes.STRING(40), allowNull: false, unique: true },
+    code: {
+    type: DataTypes.STRING(40),
+    // unique: true, // Đảm bảo bạn đã comment dòng này
+    allowNull: false,
+  },
     status: {
       type: DataTypes.ENUM("active", "used", "expired", "cancelled"),
       defaultValue: "active",

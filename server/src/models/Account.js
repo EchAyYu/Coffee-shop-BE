@@ -8,10 +8,10 @@ const Account = sequelize.define("Account", {
     primaryKey: true,
   },
   ten_dn: {
-    type: DataTypes.STRING(200),
-    unique: true,
-    allowNull: false,
-  },
+    type: DataTypes.STRING(200),
+    // unique: true, // Đảm bảo bạn đã comment dòng này
+    allowNull: false,
+  },
   mat_khau: {
     type: DataTypes.STRING(200),
     allowNull: false,
