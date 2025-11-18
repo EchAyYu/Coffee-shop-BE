@@ -10,6 +10,8 @@ import {
   changePassword,
   refreshToken,
   logout,
+  forgotPassword,       
+  resetPasswordWithOtp,
 } from "../controllers/auth.controller.js";
 import { requireAuth } from "../middlewares/authMiddleware.js";
 
@@ -56,4 +58,6 @@ router.put(
   changePassword
 );
 
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password-otp", resetPasswordWithOtp);
 export default router;

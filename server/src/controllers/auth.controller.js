@@ -237,3 +237,88 @@ export async function logout(_req, res) {
   console.log("👋 User logged out, refresh token cleared");
   return res.json({ success: true, message: "Đăng xuất thành công" });
 }
+
+
+// ===============================
+// 🆕 BỔ SUNG: QUÊN MẬT KHẨU (OTP SIMULATION)
+// ===============================
+
+// Lưu OTP tạm thời trong RAM: Map<sdt, { code, expires, id_tk }>
+const otpStore = new Map(); 
+
+// 1. Gửi OTP (Giả lập)
+export async function forgotPassword(req, res) {
+  try {
+    const { sdt } = req.body;
+
+    // Tìm khách hàng theo SĐT
+    const customer = await Customer.findOne({ where: { sdt } });
+    if (!customer) {
+      return res.status(404).json({ success: false, message: "Số điện thoại chưa được đăng ký" });
+    }
+
+    // Tạo mã OTP ngẫu nhiên 6 số
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Lưu vào RAM (hết hạn sau 5 phút)
+    otpStore.set(sdt, {
+      code: otpCode,
+      expires: Date.now() + 5 * 60 * 1000, // 5 phút
+      id_tk: customer.id_tk // Lưu id_tk để lát đổi pass
+    });
+
+    console.log(`🔥 [SIMULATION] OTP cho ${sdt} là: ${otpCode}`);
+
+    return res.json({ 
+      success: true, 
+      message: "Mã OTP đã được gửi (Kiểm tra Console/Network)", 
+      // Trả về OTP luôn để test cho dễ (Production thì xóa dòng này)
+      test_otp: otpCode 
+    });
+
+  } catch (err) {
+    console.error("ForgotPassword Error:", err);
+    return res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+}
+
+// 2. Xác nhận OTP và Đổi mật khẩu mới
+export async function resetPasswordWithOtp(req, res) {
+  try {
+    const { sdt, otp, newPassword } = req.body;
+
+    // Kiểm tra OTP trong RAM
+    const storedData = otpStore.get(sdt);
+
+    if (!storedData) {
+      return res.status(400).json({ success: false, message: "Yêu cầu hết hạn hoặc SĐT không đúng" });
+    }
+
+    if (storedData.code !== otp) {
+      return res.status(400).json({ success: false, message: "Mã OTP không chính xác" });
+    }
+
+    if (Date.now() > storedData.expires) {
+      otpStore.delete(sdt);
+      return res.status(400).json({ success: false, message: "Mã OTP đã hết hạn" });
+    }
+
+    // OTP đúng -> Tiến hành đổi pass
+    const account = await Account.findByPk(storedData.id_tk);
+    if (!account) {
+      return res.status(404).json({ success: false, message: "Tài khoản không tồn tại" });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await account.update({ mat_khau: hash });
+
+    // Xóa OTP sau khi dùng xong
+    otpStore.delete(sdt);
+
+    return res.json({ success: true, message: "Đổi mật khẩu thành công! Hãy đăng nhập lại." });
+
+  } catch (err) {
+    console.error("ResetPassword Error:", err);
+    return res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+}
