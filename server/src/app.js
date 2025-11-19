@@ -1,5 +1,3 @@
-// src/app.js (ĐÃ CẬP NHẬT ĐỂ ĐỒNG BỘ CSDL)
-
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -17,7 +15,7 @@ import { initSocket } from "./socket.js";
 
 // --- Config & Utils ---
 import { config } from "./config/config.js";
-import sequelize from "./utils/db.js"; // 💡 SEQUELIZE IMPORT
+import sequelize from "./utils/db.js"; 
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 import { swaggerDocs } from "./config/swagger.js";
 
@@ -44,6 +42,11 @@ import customerProfileRoutes from "./routes/customerProfileRoutes.js";
 import profileRoutes from "./routes/profile.js";
 import Review from "./models/Reviews.js";
 import adminReviewsRouter from "./routes/admin.reviews.js";
+
+// 💡 SỬA LỖI TẠI ĐÂY:
+// Xóa dòng: import Upload from "./models/Upload.js"; (File này không tồn tại)
+// Thêm dòng này:
+import uploadRouter from "./routes/uploads.js"; 
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -83,7 +86,7 @@ app.use(
 // ===============================
 // 📦 BODY PARSERS & COOKIES
 // ===============================
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "5mb" })); // Tăng giới hạn lên 5mb để upload base64 nếu cần
 app.use(express.urlencoded({ extended: true }));
 
 // ===============================
@@ -110,6 +113,11 @@ app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 app.use("/api/admin/orders", adminOrdersRoute);
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
+
+// 💡 SỬA LỖI TẠI ĐÂY: Thay thế express.static bằng uploadRouter
+// (Dòng cũ: app.use("/api/uploads", express.static(...)) -> Xóa hoặc comment lại)
+app.use("/api/uploads", uploadRouter); 
+
 app.use("/api/admin/orders", requireAuth, authorizeRoles("admin", "employee"), adminOrdersRoute);
 app.use("/api/admin/reviews", requireAuth, authorizeRoles("admin", "employee"), adminReviewsRouter);
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -121,28 +129,27 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 async function mountIfExists(urlPrefix, relModulePath, middlewares = []) {
-  // ... (Giữ nguyên hàm này) ...
   const absPath = path.resolve(__dirname, relModulePath.replace("./", ""));
-  if (!fs.existsSync(absPath)) {
-    console.warn(`ℹ️  Route file not found, skip mounting: ${relModulePath}`);
-    return;
-  }
-  try {
-    const mod = await import(relModulePath);
-    const router = mod.default;
-    if (!router) {
-      console.warn(`ℹ️  Route "${relModulePath}" không export default, bỏ qua.`);
-      return;
-    }
-    if (middlewares.length) {
-      app.use(urlPrefix, ...middlewares, router);
-    } else {
-      app.use(urlPrefix, router);
-    }
-    console.log(`✅ Mounted route ${urlPrefix} from ${relModulePath}`);
-  } catch (e) {
-    console.error(`❌ Lỗi import route ${relModulePath}:`, e?.message || e);
-  }
+  if (!fs.existsSync(absPath)) {
+    console.warn(`ℹ️  Route file not found, skip mounting: ${relModulePath}`);
+    return;
+  }
+  try {
+    const mod = await import(relModulePath);
+    const router = mod.default;
+    if (!router) {
+      console.warn(`ℹ️  Route "${relModulePath}" không export default, bỏ qua.`);
+      return;
+    }
+    if (middlewares.length) {
+      app.use(urlPrefix, ...middlewares, router);
+    } else {
+      app.use(urlPrefix, router);
+    }
+    console.log(`✅ Mounted route ${urlPrefix} from ${relModulePath}`);
+  } catch (e) {
+    console.error(`❌ Lỗi import route ${relModulePath}:`, e?.message || e);
+  }
 }
 await mountIfExists("/api/loyalty", "./routes/loyalty.js"); 
 await mountIfExists("/api/vouchers", "./routes/vouchers.js", [requireAuth, authorizeRoles("customer")]);
@@ -170,11 +177,8 @@ export const startServer = async () => {
     await sequelize.authenticate();
     console.log("✅ Connected to MySQL successfully!");
 
-    // ===== 💡 DÒNG MỚI ĐỂ CẬP NHẬT CSDL TỰ ĐỘNG =====
-    // Nó sẽ 'ALTER TABLE' để thêm id_don, rating_avg, rating_count
     await sequelize.sync({ alter: true });
     console.log("✅ Database synced (alter: true)");
-    // =================================================
 
     const httpServer = http.createServer(app);
     initSocket(httpServer, ALLOW_ORIGINS);
