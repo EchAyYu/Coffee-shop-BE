@@ -10,6 +10,8 @@ import Order from "../models/Order.js";
 import OrderDetail from "../models/OrderDetail.js";
 import Product from "../models/Product.js";
 import sequelize from "../utils/db.js"; 
+import { Op } from "sequelize";
+import db from "../models/index.js";
 
 // 💡 --- Helper Function: Hàm gửi thông báo (Nội bộ) ---
 async function sendReservationNotification(reservation, newStatusLabel) {
@@ -303,5 +305,56 @@ export async function deleteReservation(req, res) {
     res.json({ success: true, message: "Đã xóa thành công" });
   } catch (err) {
     res.status(500).json({ success: false, message: "Lỗi xóa", error: err.message });
+  }
+}
+
+// 💡 MỚI: Lấy các khung giờ đã đặt cho bàn trong ngày cụ thể
+export async function getBusySlots(req, res) {
+  try {
+    const { id_ban, date } = req.query;
+
+    console.log("🔍 DEBUG BUSY SLOTS:", { id_ban, date });
+
+    if (!id_ban || !date) {
+      return res.status(400).json({ message: "Thiếu id_ban hoặc date" });
+    }
+
+    const bookings = await Reservation.findAll({
+      where: {
+        id_ban: id_ban,
+        
+        // 💡 ĐOẠN NÀY SẼ HẾT LỖI VÌ ĐÃ CÓ BIẾN 'db'
+        [Op.and]: [
+          db.sequelize.where(
+            db.sequelize.fn('DATE', db.sequelize.col('ngay_dat')), 
+            '=', 
+            date
+          )
+        ],
+
+        trang_thai: {
+          [Op.or]: [
+            'confirmed', 'CONFIRMED', 'Confirmed',
+            'arrived', 'ARRIVED',
+            'done', 'DONE',
+            'Đã xác nhận', 'đã xác nhận'
+          ]
+        }
+      },
+      attributes: ['gio_dat', 'trang_thai'],
+      order: [['gio_dat', 'ASC']]
+    });
+
+    console.log(`✅ Tìm thấy ${bookings.length} đơn.`);
+
+    const busyTimes = bookings.map(b => b.gio_dat);
+
+    res.json({
+      success: true,
+      data: busyTimes
+    });
+  } catch (err) {
+    console.error("❌ Lỗi lấy lịch bàn:", err);
+    res.status(500).json({ message: "Lỗi server" });
   }
 }

@@ -7,12 +7,27 @@ import {
   getReservationById,
   updateReservationStatus,
   deleteReservation,
+  getBusySlots
 } from "../controllers/reservations.controller.js";
 import { requireAuth, authorizeRoles } from "../middlewares/authMiddleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
 
+
 const router = express.Router();
+
+// ==========================
+// 💡 PUBLIC / COMMON ROUTES (Ai cũng truy cập được)
+// ==========================
+
+// 1. Lấy khung giờ đã đặt (Để khách xem lịch tránh trùng)
+// Đặt lên đầu để tránh xung đột với các route có param :id
+router.get(
+  "/busy-slots",
+  requireAuth, // Cần đăng nhập (bất kể role nào: customer/admin/employee đều được)
+  asyncHandler(getBusySlots)
+);
+
 
 // ==========================
 // CLIENT ROUTES (Khách hàng)
@@ -41,45 +56,42 @@ router.get(
 // ADMIN & EMPLOYEE ROUTES
 // ==========================
 
-// 1. Lấy danh sách (Admin + Employee)
+// 2. Lấy danh sách (Admin + Employee)
 router.get(
   "/",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   asyncHandler(getAllReservations)
 );
 
-// 2. Xem chi tiết (Admin + Employee)
+// 3. Xem chi tiết (Admin + Employee)
 router.get(
   "/:id",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   [param("id").isInt({min: 1}).toInt()],
   validate,
   asyncHandler(getReservationById)
 );
 
-// 3. Cập nhật trạng thái (Admin + Employee - để nhân viên "tiếp nhận")
+// 4. Cập nhật trạng thái (Admin + Employee)
 router.put(
   "/:id",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   [
     param("id").isInt({min: 1}).toInt(),
-    body("status")
-      .isIn(["CONFIRMED", "CANCELLED", "DONE"]) // Các trạng thái hợp lệ
-      .withMessage("Trạng thái không hợp lệ"),
+    // Validation tùy chọn nếu cần
   ],
   validate,
   asyncHandler(updateReservationStatus)
 );
 
-// 4. Xóa đặt bàn (Chỉ Admin nên được xóa? Hoặc cả nhân viên tùy bạn)
-// Ở đây tôi để cả Employee để họ quản lý toàn diện
+// 5. Xóa đặt bàn (Admin + Employee)
 router.delete(
   "/:id",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   [param("id").isInt({min: 1}).toInt()],
   validate,
   asyncHandler(deleteReservation)
