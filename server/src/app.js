@@ -42,6 +42,8 @@ import customerProfileRoutes from "./routes/customerProfileRoutes.js";
 import profileRoutes from "./routes/profile.js";
 import Review from "./models/Reviews.js";
 import adminReviewsRouter from "./routes/admin.reviews.js";
+import chatbotRouter from "./routes/chatbot.js";
+
 
 // 💡 SỬA LỖI TẠI ĐÂY:
 // Xóa dòng: import Upload from "./models/Upload.js"; (File này không tồn tại)
@@ -113,7 +115,7 @@ app.use("/api/employees", employeesRouter);
 app.use("/api/promotions", promotionsRouter);
 app.use("/api/admin/orders", adminOrdersRoute);
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
-
+app.use("/api/chatbot", chatbotRouter);
 // 💡 SỬA LỖI TẠI ĐÂY: Thay thế express.static bằng uploadRouter
 // (Dòng cũ: app.use("/api/uploads", express.static(...)) -> Xóa hoặc comment lại)
 app.use("/api/uploads", uploadRouter); 
