@@ -1,74 +1,122 @@
 import Groq from "groq-sdk";
+import db from "../models/index.js";
+
+const { Product, Category } = db;
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+// Gom menu từ DB thành text gọn
+function buildMenuText(products = []) {
+  if (!products.length) return "Menu trống hoặc không lấy được dữ liệu.";
+
+  const byCat = {};
+
+  for (const p of products) {
+    const catName = p.Category?.ten_dm || "Khác";
+    if (!byCat[catName]) byCat[catName] = [];
+    byCat[catName].push(p);
+  }
+
+  let text = "MENU hiện tại (lấy từ Database):\n";
+  for (const [cat, items] of Object.entries(byCat)) {
+    text += `- ${cat}:\n`;
+    for (const item of items.slice(0, 5)) {
+      text += `   • ${item.ten_mon} (${item.gia} VNĐ)\n`;
+    }
+  }
+
+  return text;
+}
+
 export const handleChatbotMessage = async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, history } = req.body;
 
-    if (!message || !message.trim()) {
-      return res.status(400).json({
-        message: "Vui lòng nhập nội dung câu hỏi.",
-      });
+    if (!message?.trim()) {
+      return res.status(400).json({ message: "Vui lòng nhập câu hỏi." });
     }
 
+    // ==============================
+    // 1. Lấy menu từ DB
+    // ==============================
+    let products = [];
+    try {
+      products = await Product.findAll({
+        where: { trang_thai: true },
+        include: [{ model: Category, required: false }],
+        limit: 40,
+        order: [["id_mon", "ASC"]],
+      });
+    } catch (err) {
+      console.error("Lỗi lấy menu cho chatbot:", err);
+    }
+
+    const menuText = buildMenuText(products);
+
+    // ==============================
+    // 2. Chuẩn bị lịch sử hội thoại (history)
+    //    history FE gửi lên dạng:
+    //    [{ role: "user" | "assistant", content: "..." }, ...]
+    // ==============================
+    let chatHistory = [];
+    if (Array.isArray(history)) {
+      chatHistory = history
+        .filter((m) => m && m.role && m.content)
+        // giới hạn tối đa 8 lượt để tránh prompt quá dài
+        .slice(-8)
+        .map((m) => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: m.content,
+        }));
+    }
+
+    // ==============================
+    // 3. System prompt: thêm logic ĐẶT BÀN
+    // ==============================
     const systemPrompt = `
-Bạn là chatbot hỗ trợ khách hàng của quán cà phê LO Coffee trong một dự án luận văn tốt nghiệp.
-Hãy luôn trả lời bằng tiếng Việt, ngắn gọn, thân thiện, xưng "mình" và gọi khách là "bạn".
+Bạn là chatbot hỗ trợ khách hàng của quán LO Coffee. 
+Trả lời thân thiện, ngắn gọn, bằng tiếng Việt. Xưng "mình", gọi khách là "bạn".
 
-1. Thông tin quán:
-- LO Coffee là quán cà phê phục vụ tại chỗ và đặt hàng online.
-- Quán có không gian ngồi lại, phù hợp làm việc, học tập và gặp gỡ bạn bè.
+1. Nhiệm vụ:
+- Giới thiệu quán, menu đồ uống và bánh.
+- Gợi ý món phù hợp theo sở thích (ít đắng, nhiều sữa, ít ngọt, không uống được cà phê...).
+- Hướng dẫn cách đặt món online, thanh toán (COD, VNPay) trên website.
+- HỖ TRỢ ĐẶT BÀN (booking) qua hội thoại nhiều bước.
 
-2. Menu (ví dụ):
-- Cà phê: Đen đá, Đen nóng, Sữa đá, Bạc xỉu, Cappuccino, Latte, Caramel Macchiato...
-  + Đen đá: vị đắng rõ, ít sữa, hợp người quen uống cà phê.
-  + Cà phê sữa/Latte/Caramel: vị nhẹ nhàng hơn, ít đắng, nhiều sữa.
-- Trà: Trà đào cam sả, Trà vải, Trà sen vàng, Trà chanh...
-- Đá xay: Cookies đá xay, Caramel đá xay, Matcha đá xay...
-- Topping: trân châu, thạch, kem cheese (tuỳ món).
-- Bánh: Cheesecake, Tiramisu, bánh mousse, một số loại bánh ngọt khác.
+2. Menu thật của quán (lấy từ hệ thống):
+${menuText}
 
-Khi khách hỏi gợi ý đồ uống:
-- Nếu khách thích "ít đắng, nhiều sữa": gợi ý Latte, Bạc xỉu, Caramel Macchiato, các loại đá xay.
-- Nếu khách thích "đậm, ít sữa": gợi ý Đen đá, Đen nóng, Americano.
-- Nếu khách không uống được cà phê: gợi ý trà trái cây hoặc đá xay.
+3. Quy tắc khi khách muốn ĐẶT BÀN:
+- Nhận diện các câu có ý nghĩa như: "mình muốn đặt bàn", "booking", "giữ chỗ", "đặt chỗ", ...
+- Nếu khách muốn đặt bàn nhưng CHƯA đủ thông tin, hãy HỎI LẦN LƯỢT:
+  1) Ngày (theo kiểu "ngày 21/11", "ngày mai", "thứ bảy tuần này"...)
+  2) Giờ (ví dụ: 19:00)
+  3) Số lượng người
+  4) Tên người đặt
+  5) Số điện thoại liên hệ
+- Chỉ cần hỏi những thông tin còn thiếu, không hỏi lại những gì khách đã cung cấp.
+- Khi đã đủ 5 thông tin trên, hãy:
+  - TÓM TẮT lại đầy đủ: ngày, giờ, số người, tên, số điện thoại.
+  - Hỏi khách xác nhận lần cuối kiểu: 
+    "Mình ghi nhận đặt bàn lúc ... cho ... người, tên ..., số điện thoại .... Đúng vậy không?"
+- Không tự khẳng định là đã ghi vào hệ thống, chỉ nói là "mình đã ghi nhận thông tin đặt bàn".
+  (Phần lưu database sẽ do hệ thống xử lý sau.)
 
-3. Đặt món online trên website:
-- Hướng dẫn chung:
-  + Bước 1: Vào trang Menu, chọn sản phẩm.
-  + Bước 2: Bấm "Thêm vào giỏ".
-  + Bước 3: Vào trang Giỏ hàng / Thanh toán (Checkout).
-  + Bước 4: Nhập thông tin nhận hàng (tên, số điện thoại, địa chỉ).
-  + Bước 5: Chọn phương thức thanh toán (COD hoặc VNPay).
-  + Bước 6: Xác nhận đặt hàng.
-- Nếu khách hỏi có thể thanh toán online được không: trả lời là có VNPay (nếu hệ thống có), và giải thích ngắn gọn.
-
-4. Đặt bàn (booking):
-- Luồng đặt bàn cơ bản:
-  + Bước 1: Vào trang Đặt bàn (Booking).
-  + Bước 2: Chọn ngày, giờ, số lượng người.
-  + Bước 3: Nhập thông tin liên hệ (tên, số điện thoại).
-  + Bước 4: Xác nhận đặt bàn.
-- Nếu khách hỏi còn bàn không: bạn không biết real-time, chỉ có thể hướng dẫn khách dùng chức năng đặt bàn trên website, hoặc gọi điện trực tiếp đến quán (nói chung chung).
-
-5. Khuyến mãi và voucher:
-- Nếu khách hỏi khuyến mãi:
-  + Giải thích rằng quán có thể có các voucher giảm giá, tích điểm, chương trình theo dịp.
-  + Hướng dẫn khách vào mục khuyến mãi / trang Redeem voucher trong website (nếu có).
-- Nếu không chắc thông tin, hãy trả lời chung chung, không bịa chi tiết.
-
-6. Quy tắc quan trọng:
-- Luôn tập trung vào chủ đề: menu, đặt món, đặt bàn, khuyến mãi, thông tin quán.
-- Nếu câu hỏi không liên quan (ví dụ về chính trị, tôn giáo, code...), hãy trả lời ngắn gọn rằng bạn là chatbot quán cà phê và gợi ý khách hỏi về đồ uống hoặc dịch vụ.
+4. Quy tắc chung:
+- Nếu câu hỏi không liên quan tới quán cà phê, hãy nói ngắn gọn rằng bạn chỉ hỗ trợ về menu, đặt món, đặt bàn, khuyến mãi.
+- Không bịa thêm giá tiền hoặc chương trình khuyến mãi chi tiết nếu không có trong dữ liệu.
 `;
 
+    // ==============================
+    // 4. Gọi Groq với history + câu mới
+    // ==============================
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: systemPrompt },
+        ...chatHistory,
         { role: "user", content: message },
       ],
       temperature: 0.7,
@@ -76,14 +124,14 @@ Khi khách hỏi gợi ý đồ uống:
     });
 
     const reply =
-      completion.choices?.[0]?.message?.content ??
-      "Xin lỗi, mình chưa hiểu ý bạn lắm. Bạn hỏi lại giúp mình nhé.";
+      completion.choices?.[0]?.message?.content ||
+      "Xin lỗi, mình chưa hiểu ý bạn. Bạn có thể nói lại không?";
 
     return res.json({ reply });
   } catch (error) {
-    console.error("Lỗi chatbot:", error);
+    console.error("Chatbot error:", error);
     return res.status(500).json({
-      message: "Chatbot đang gặp sự cố, bạn thử lại sau nhé.",
+      message: "Chatbot đang gặp lỗi, vui lòng thử lại.",
     });
   }
 };
