@@ -1,5 +1,34 @@
 import Promotion from "../models/Promotion.js";
+import { Op } from "sequelize";
 
+// Hàm mới: Lấy khuyến mãi công khai (dành cho client/FE)
+export async function getPublicPromotions(req, res) {
+  try {
+    const today = new Date();
+    // Đặt giờ về 00:00:00 để so sánh ngày chính xác
+    today.setHours(0, 0, 0, 0); 
+    
+    const publicPromos = await Promotion.findAll({
+      // Lấy các khuyến mãi thỏa 2 điều kiện:
+      where: {
+        hien_thi: true, // 1. Admin cho phép hiển thị
+        // 2. (ngay_kt IS NULL - không có ngày kết thúc) HOẶC (ngay_kt >= ngày hôm nay)
+        [Op.or]: [
+          { ngay_kt: { [Op.eq]: null } },
+          { ngay_kt: { [Op.gte]: today } }
+        ]
+      },
+      order: [
+        ['id_km', 'DESC'] // Sắp xếp cái mới nhất lên đầu
+      ]
+    });
+
+    res.json(publicPromos);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Lỗi server khi lấy khuyến mãi công khai" });
+  }
+}
 // Lấy tất cả khuyến mãi
 export async function getAllPromotions(req, res) {
   try {
