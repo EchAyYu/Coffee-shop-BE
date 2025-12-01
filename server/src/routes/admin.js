@@ -38,12 +38,6 @@ import {
   deleteEmployee 
 } from "../controllers/employees.controller.js";
 import {
-  getAllPromotions,
-  createPromotion,
-  updatePromotion,
-  deletePromotion,
-} from "../controllers/promotions.controller.js";
-import {
   getAllReservations,
   updateReservationStatus,
   deleteReservation,
@@ -92,12 +86,6 @@ r.get("/employees/:id", getEmployeeById);
 r.post("/employees", createEmployee);
 r.put("/employees/:id", updateEmployee);
 r.delete("/employees/:id", deleteEmployee);
-
-// Quản lý khuyến mãi
-r.get("/promotions", getAllPromotions);
-r.post("/promotions", createPromotion);
-r.put("/promotions/:id", updatePromotion);
-r.delete("/promotions/:id", deletePromotion);
 
 // Quản lý đặt bàn (chỉ admin)
 r.get("/reservations", getAllReservations);

@@ -3,15 +3,19 @@ import { body } from "express-validator";
 import { requireAuth, authorizeRoles } from "../middlewares/authMiddleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
-import { listCatalog, redeemVoucher, myVouchers, validateCode } from "../controllers/voucher.controller.js";
-//import { redeemVoucher } from "../controllers/loyalty.controller.js";
+import {
+  listCatalog,
+  redeemVoucher,
+  myVouchers,
+  validateCode,
+} from "../controllers/voucher.controller.js";
 
 const router = Router();
 
-// Danh mục mở (có thể public hoặc bắt customer – tuỳ bạn)
+// Danh mục voucher (public cho FE dùng tab Đổi thưởng)
 router.get("/catalog", asyncHandler(listCatalog));
 
-// Đổi điểm
+// Đổi điểm lấy voucher
 router.post(
   "/redeem",
   requireAuth,
@@ -21,10 +25,15 @@ router.post(
   asyncHandler(redeemVoucher)
 );
 
-// Mã của tôi
-router.get("/my", requireAuth, authorizeRoles("customer"), asyncHandler(myVouchers));
+// Voucher cá nhân
+router.get(
+  "/my",
+  requireAuth,
+  authorizeRoles("customer"),
+  asyncHandler(myVouchers)
+);
 
-// Kiểm tra mã
+// Kiểm tra mã khi checkout
 router.post(
   "/validate",
   requireAuth,
@@ -33,7 +42,5 @@ router.post(
   validate,
   asyncHandler(validateCode)
 );
-
-router.post("/redeem", requireAuth, authorizeRoles("customer"), asyncHandler(redeemVoucher));
 
 export default router;
