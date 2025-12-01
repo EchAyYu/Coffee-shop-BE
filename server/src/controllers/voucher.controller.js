@@ -142,6 +142,8 @@ export async function listCatalog(req, res) {
     const rows = await Voucher.findAll({
       where: {
         active: true,
+        // 🔥 Chỉ hiển thị những voucher ĐỔI BẰNG ĐIỂM (points_cost > 0)
+        points_cost: { [Op.gt]: 0 },
         [Op.and]: [
           // Chưa hết hạn: expires_at null hoặc > now
           {
@@ -346,7 +348,7 @@ export async function validateCode(req, res) {
 
 export async function grantWelcomeVoucherForNewUser(id_tk) {
   try {
-    const WELCOME_VOUCHER_NAME = "VOUCHER 20K";
+    const WELCOME_VOUCHER_NAME = "VOUCHER 20%";
 
     // 1. Tìm voucher mẫu
     const v = await Voucher.findOne({
