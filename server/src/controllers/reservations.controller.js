@@ -1,74 +1,89 @@
+// src/controllers/reservations.controller.js
 // ================================
 // ☕ Coffee Shop Backend - Reservations Controller (Fixed)
 // ================================
 import Reservation from "../models/Reservation.js";
 import Customer from "../models/Customer.js";
 import Table from "../models/Table.js";
-import Notification from "../models/Notification.js"; 
-import { emitToUser } from "../socket.js";            
+import Notification from "../models/Notification.js";
+import { emitToUser } from "../socket.js";
 import Order from "../models/Order.js";
 import OrderDetail from "../models/OrderDetail.js";
 import Product from "../models/Product.js";
-import sequelize from "../utils/db.js"; 
+import sequelize from "../utils/db.js";
 import { Op } from "sequelize";
 import db from "../models/index.js";
+
+// Helper: validate ngày / giờ
+const isValidDateString = (str) => /^\d{4}-\d{2}-\d{2}$/.test(str || "");
+const isValidTimeString = (str) => /^\d{2}:\d{2}$/.test(str || "");
 
 // 💡 --- Helper Function: Hàm gửi thông báo (Nội bộ) ---
 async function sendReservationNotification(reservation, newStatusLabel) {
   try {
-    if (!reservation.id_kh) return; // Không có khách hàng, không gửi
+    if (!reservation.id_kh) return;
 
     const customer = await Customer.findByPk(reservation.id_kh);
-    if (!customer || !customer.id_tk) return; // Không tìm thấy tài khoản
+    if (!customer || !customer.id_tk) return;
 
     const title = `Đặt bàn #${reservation.id_datban} ${newStatusLabel}`;
     const message = `Yêu cầu đặt bàn của bạn (ID: #${reservation.id_datban}) đã được ${newStatusLabel.toLowerCase()}.`;
 
-    // 1. Tạo thông báo trong CSDL
     const newNotification = await Notification.create({
       id_tk: customer.id_tk,
-      type: "reservation", // 💡 Ghi rõ type là 'reservation'
-      title: title,
-      message: message,
+      type: "reservation",
+      title,
+      message,
     });
 
-    // 2. Bắn sự kiện Socket
     emitToUser(customer.id_tk, "new_notification", newNotification.toJSON());
-    
     console.log(`[Socket] Đã gửi thông báo đặt bàn cho id_tk: ${customer.id_tk}`);
-
   } catch (e) {
     console.error("Lỗi khi gửi thông báo đặt bàn:", e.message);
-    // Không ném lỗi ra ngoài để tránh làm hỏng API chính
   }
 }
+
 /**
- * 📅 Khách hàng tạo đặt bàn (VÀ ĐẶT MÓN TRƯỚC)
- */
+ * 📅 Khách hàng tạo đặt bàn (VÀ ĐẶT MÓN TRƯỚC)
+ */
 export async function createReservation(req, res) {
-  // 💡 Bọc toàn bộ logic trong một transaction
-  const t = await sequelize.transaction();
+  const t = await sequelize.transaction();
 
-  try {
-    // 💡 Lấy thêm 'items' từ req.body
-    const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu, id_ban, items } = req.body; 
+  try {
+    const {
+      ho_ten,
+      sdt,
+      ngay_dat,
+      gio_dat,
+      so_nguoi,
+      ghi_chu,
+      id_ban,
+      items,
+    } = req.body;
 
-    const customer = await Customer.findOne({ where: { id_tk: req.user.id_tk } });
-    if (!customer) {
+    // ✅ Validate ngày & giờ trước khi làm gì khác
+    if (!isValidDateString(ngay_dat) || !isValidTimeString(gio_dat)) {
       await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Không tìm thấy khách hàng cho tài khoản này",
-      });
-    }
+      return res.status(400).json({
+        success: false,
+        message: "Ngày/giờ đặt bàn không hợp lệ. Vui lòng chọn lại.",
+      });
+    }
+
+    const customer = await Customer.findOne({ where: { id_tk: req.user.id_tk } });
+    if (!customer) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Không tìm thấy khách hàng cho tài khoản này",
+      });
+    }
 
     let preOrder = null;
     let preOrderId = null;
 
     // 💡💡💡 LOGIC XỬ LÝ ĐẶT MÓN TRƯỚC 💡💡💡
     if (items && Array.isArray(items) && items.length > 0) {
-      
-      // 1. Tính tổng tiền (Cần lấy giá từ DB để đảm bảo)
       let tong_tien = 0;
       const orderDetailsData = [];
 
@@ -76,75 +91,78 @@ export async function createReservation(req, res) {
         const product = await Product.findByPk(item.id_mon);
         if (!product) {
           await t.rollback();
-          return res.status(400).json({ success: false, message: `Không tìm thấy sản phẩm với ID: ${item.id_mon}` });
+          return res.status(400).json({
+            success: false,
+            message: `Không tìm thấy sản phẩm với ID: ${item.id_mon}`,
+          });
         }
-        const gia = parseFloat(product.gia); // Lấy giá từ model Product
+        const gia = parseFloat(product.gia);
         tong_tien += gia * parseInt(item.so_luong, 10);
-        
+
         orderDetailsData.push({
           id_mon: item.id_mon,
           so_luong: item.so_luong,
-          gia: gia,
-          // id_don sẽ được gán tự động khi tạo Order
+          gia,
         });
       }
 
-      // 2. Tạo Order
-      preOrder = await Order.create({
-        id_kh: customer.id_kh,
-        ho_ten_nhan: ho_ten, // Lấy tên từ form đặt bàn
-        sdt_nhan: sdt,       // Lấy SĐT từ form đặt bàn
-        dia_chi_nhan: "Đặt tại quán (Pre-order for Reservation)", // 👈 Ghi chú
-        email_nhan: customer.email, // Lấy email khách
-        pttt: "COD", // 👈 Mặc định (hoặc bạn có thể thêm 'PAY_AT_STORE')
-        trang_thai: "pending", // 👈 TRẠNG THÁI MỚI
-        tong_tien: tong_tien,
-        ghi_chu: `Đặt trước cho bàn ngày ${ngay_dat} lúc ${gio_dat}`,
-      }, { transaction: t }); // 👈 Thêm transaction
+      preOrder = await Order.create(
+        {
+          id_kh: customer.id_kh,
+          ho_ten_nhan: ho_ten,
+          sdt_nhan: sdt,
+          dia_chi_nhan: "Đặt tại quán (Pre-order for Reservation)",
+          email_nhan: customer.email,
+          pttt: "COD",
+          trang_thai: "pending",
+          tong_tien,
+          ghi_chu: `Đặt trước cho bàn ngày ${ngay_dat} lúc ${gio_dat}`,
+        },
+        { transaction: t }
+      );
 
-      // 3. Gắn id_don vào OrderDetail và tạo
-      const detailsWithOrderId = orderDetailsData.map(detail => ({
+      const detailsWithOrderId = orderDetailsData.map((detail) => ({
         ...detail,
-        id_don: preOrder.id_don
+        id_don: preOrder.id_don,
       }));
 
-      await OrderDetail.bulkCreate(detailsWithOrderId, { transaction: t }); // 👈 Thêm transaction
-      
-      preOrderId = preOrder.id_don; // Lấy ID để lưu vào Reservation
+      await OrderDetail.bulkCreate(detailsWithOrderId, { transaction: t });
+      preOrderId = preOrder.id_don;
     }
     // 💡💡💡 KẾT THÚC LOGIC ĐẶT MÓN 💡💡💡
 
-    const newR = await Reservation.create({
-      id_kh: customer.id_kh,
-      id_ban: id_ban, 
-      ho_ten,
-      sdt,
-      ngay_dat,
-      gio_dat,
-      so_nguoi,
-      ghi_chu,
-      trang_thai: "PENDING",
-      id_don_dat_truoc: preOrderId, // 👈 GÁN ID ĐƠN ĐẶT TRƯỚC VÀO ĐÂY
-    }, { transaction: t }); // 👈 Thêm transaction
+    const newR = await Reservation.create(
+      {
+        id_kh: customer.id_kh,
+        id_ban,
+        ho_ten,
+        sdt,
+        ngay_dat,
+        gio_dat,
+        so_nguoi,
+        ghi_chu,
+        trang_thai: "PENDING",
+        id_don_dat_truoc: preOrderId,
+      },
+      { transaction: t }
+    );
 
-    // Nếu mọi thứ thành công, commit transaction
     await t.commit();
 
-    res.status(201).json({
-      success: true,
-      message: "Đặt bàn thành công",
-      reservation: newR,
-    });
-  } catch (err) {
-    // Nếu có lỗi, rollback
+    res.status(201).json({
+      success: true,
+      message: "Đặt bàn thành công",
+      reservation: newR,
+    });
+  } catch (err) {
     await t.rollback();
-    console.error("❌ Lỗi tạo đặt bàn:", err);
-    res.status(500).json({
-      success: false,
-      message: "Lỗi tạo đặt bàn",
-      error: err.message,
-    });
-  }
+    console.error("❌ Lỗi tạo đặt bàn:", err);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi tạo đặt bàn",
+      error: err.message,
+    });
+  }
 }
 
 /**
@@ -178,8 +196,8 @@ export async function getMyReservations(req, res) {
 }
 
 /**
- * 🧾 Admin xem toàn bộ đơn
- */
+ * 🧾 Admin xem toàn bộ đơn
+ */
 export async function getAllReservations(req, res) {
   try {
     const reservations = await Reservation.findAll({
@@ -187,12 +205,12 @@ export async function getAllReservations(req, res) {
         {
           model: Customer,
           attributes: ["id_kh", "ho_ten", "email", "sdt"],
-          required: false, // 🔴 QUAN TRỌNG: LEFT JOIN, không làm rơi đơn không có id_kh
+          required: false,
         },
         {
           model: Table,
           attributes: ["id_ban", "ten_ban", "so_ban"],
-          required: false, // 🔴 Đơn chưa gán bàn vẫn hiện (Table = null)
+          required: false,
         },
       ],
       order: [
@@ -213,87 +231,87 @@ export async function getAllReservations(req, res) {
 }
 
 /**
- * ℹ️ Admin xem chi tiết 1 đơn (CẬP NHẬT LẠI)
- */
+ * ℹ️ Admin xem chi tiết 1 đơn (CẬP NHẬT LẠI)
+ */
 export async function getReservationById(req, res) {
-  try {
-  	const { id } = req.params;
-  	const reservation = await Reservation.findByPk(id, {
-  	  include: [
-  	 	 { model: Customer }, 
-  	 	 { model: Table },
-  	 	 // 💡💡💡 THÊM INCLUDE LỒNG NHAU 💡💡💡
-  	 	 {
-  	 	   model: Order,
-  	 	   as: "PreOrder", // 👈 Phải khớp với 'as' trong Model
-  	 	   include: [
-  	 	 	 {
-  	 	 	   model: OrderDetail,
-  	 	 	   include: [
-                  // 💡💡💡 SỬA LỖI Ở ĐÂY 💡💡💡
-                  // Bỏ 'hinh_anh' vì cột này không tồn tại trong bảng 'mon'
-  	 	 	 	 { model: Product, attributes: ['ten_mon'] } 
-                  // 💡💡💡 KẾT THÚC SỬA LỖI 💡💡💡
-  	 	 	   ]
-  	 	 	 }
-  	 	   ]
-  	 	 }
-  	 	 // 💡💡💡 KẾT THÚC INCLUDE MỚI 💡💡💡
-  	  ]
-  	});
+  try {
+    const { id } = req.params;
+    const reservation = await Reservation.findByPk(id, {
+      include: [
+        { model: Customer },
+        { model: Table },
+        {
+          model: Order,
+          as: "PreOrder",
+          include: [
+            {
+              model: OrderDetail,
+              include: [
+                { model: Product, attributes: ["ten_mon"] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
 
-  	if (!reservation) {
-  	  return res.status(404).json({ success: false, message: "Không tìm thấy đơn đặt bàn" });
-  	}
+    if (!reservation) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy đơn đặt bàn" });
+    }
 
-  	res.json({ success: true, data: reservation });
-  } catch (err) {
-    // Dòng console.error này bạn có thể giữ hoặc xóa đi
-  	console.error("❌ LỖI TRONG getReservationById:", err);
-  	res.status(500).json({
-  	  success: false,
-  	  message: "Lỗi lấy chi tiết đặt bàn",
-  	  error: err.message,
-  	});
-  }
+    res.json({ success: true, data: reservation });
+  } catch (err) {
+    console.error("❌ LỖI TRONG getReservationById:", err);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi lấy chi tiết đặt bàn",
+      error: err.message,
+    });
+  }
 }
 
 /**
- * 🛠️ Admin cập nhật trạng thái
- */
+ * 🛠️ Admin cập nhật trạng thái
+ */
 export async function updateReservationStatus(req, res) {
-  try {
-    const { id } = req.params;
-    const { status } = req.body; // status nhận vào là "CONFIRMED", "CANCELLED"...
-    const reservation = await Reservation.findByPk(id);
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const reservation = await Reservation.findByPk(id);
 
-    if (!reservation)
-      return res.status(404).json({ success: false, message: "Không tìm thấy" });
+    if (!reservation)
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy" });
 
-    // Chỉ gửi thông báo nếu trạng thái thực sự thay đổi
     const oldStatus = reservation.trang_thai;
     if (oldStatus === status) {
-       return res.json({ success: true, message: "Trạng thái không đổi", data: reservation });
+      return res.json({
+        success: true,
+        message: "Trạng thái không đổi",
+        data: reservation,
+      });
     }
 
-    await reservation.update({ trang_thai: status });
+    await reservation.update({ trang_thai: status });
 
-    // 💡💡💡 LOGIC GỬI THÔNG BÁO MỚI 💡💡💡
     let statusLabel = "";
     if (status === "CONFIRMED") statusLabel = "Đã xác nhận";
     if (status === "CANCELLED") statusLabel = "Đã hủy";
     if (status === "DONE") statusLabel = "Đã hoàn thành";
 
     if (statusLabel) {
-      // Chạy bất đồng bộ, không cần await để API trả về nhanh
       sendReservationNotification(reservation, statusLabel);
     }
-    // 💡💡💡 KẾT THÚC LOGIC MỚI 💡💡💡
 
-    res.json({ success: true, message: "Cập nhật thành công", data: reservation });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi cập nhật", error: err.message });
-  }
+    res.json({ success: true, message: "Cập nhật thành công", data: reservation });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi cập nhật", error: err.message });
+  }
 }
 
 /**
@@ -305,12 +323,16 @@ export async function deleteReservation(req, res) {
     const reservation = await Reservation.findByPk(id);
 
     if (!reservation)
-      return res.status(404).json({ success: false, message: "Không tìm thấy" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy" });
 
     await reservation.destroy();
     res.json({ success: true, message: "Đã xóa thành công" });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi xóa", error: err.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi xóa", error: err.message });
   }
 }
 
@@ -328,36 +350,38 @@ export async function getBusySlots(req, res) {
     const bookings = await Reservation.findAll({
       where: {
         id_ban: id_ban,
-        
-        // 💡 ĐOẠN NÀY SẼ HẾT LỖI VÌ ĐÃ CÓ BIẾN 'db'
         [Op.and]: [
           db.sequelize.where(
-            db.sequelize.fn('DATE', db.sequelize.col('ngay_dat')), 
-            '=', 
+            db.sequelize.fn("DATE", db.sequelize.col("ngay_dat")),
+            "=",
             date
-          )
+          ),
         ],
-
         trang_thai: {
           [Op.or]: [
-            'confirmed', 'CONFIRMED', 'Confirmed',
-            'arrived', 'ARRIVED',
-            'done', 'DONE',
-            'Đã xác nhận', 'đã xác nhận'
-          ]
-        }
+            "confirmed",
+            "CONFIRMED",
+            "Confirmed",
+            "arrived",
+            "ARRIVED",
+            "done",
+            "DONE",
+            "Đã xác nhận",
+            "đã xác nhận",
+          ],
+        },
       },
-      attributes: ['gio_dat', 'trang_thai'],
-      order: [['gio_dat', 'ASC']]
+      attributes: ["gio_dat", "trang_thai"],
+      order: [["gio_dat", "ASC"]],
     });
 
     console.log(`✅ Tìm thấy ${bookings.length} đơn.`);
 
-    const busyTimes = bookings.map(b => b.gio_dat);
+    const busyTimes = bookings.map((b) => b.gio_dat);
 
     res.json({
       success: true,
-      data: busyTimes
+      data: busyTimes,
     });
   } catch (err) {
     console.error("❌ Lỗi lấy lịch bàn:", err);
@@ -365,11 +389,17 @@ export async function getBusySlots(req, res) {
   }
 }
 
-// 💡 MỚI: Tạo đặt bàn từ chatbot
+// 💡 MỚI: Tạo đặt bàn từ chatbot (nếu sau này dùng endpoint riêng)
 export async function createReservationFromChatbot(req, draft) {
   const t = await sequelize.transaction();
   try {
     const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu } = draft;
+
+    // ✅ Validate ngày/giờ cho chatbot luôn
+    if (!isValidDateString(ngay_dat) || !isValidTimeString(gio_dat)) {
+      await t.rollback();
+      throw new Error("Ngày/giờ đặt bàn (chatbot) không hợp lệ.");
+    }
 
     const customer = await Customer.findOne({
       where: { id_tk: req.user.id_tk },
@@ -383,7 +413,7 @@ export async function createReservationFromChatbot(req, draft) {
     const newR = await Reservation.create(
       {
         id_kh: customer.id_kh,
-        id_ban: null, // 👈 đặt qua chatbot: để trống, admin tự gán
+        id_ban: null,
         ho_ten,
         sdt,
         ngay_dat,
