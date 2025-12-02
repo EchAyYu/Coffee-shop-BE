@@ -181,29 +181,35 @@ export async function getMyReservations(req, res) {
  * 🧾 Admin xem toàn bộ đơn
  */
 export async function getAllReservations(req, res) {
-  try {
-    const reservations = await Reservation.findAll({
-      // 💡 CẬP NHẬT INCLUDE: Thêm 'Table'
-      include: [
-        { 
-          model: Customer, 
-          attributes: ['id_kh', 'ho_ten'] // Lấy ít trường hơn cho nhẹ
+  try {
+    const reservations = await Reservation.findAll({
+      include: [
+        {
+          model: Customer,
+          attributes: ["id_kh", "ho_ten", "email", "sdt"],
+          required: false, // 🔴 QUAN TRỌNG: LEFT JOIN, không làm rơi đơn không có id_kh
         },
         {
           model: Table,
-          attributes: ['id_ban', 'ten_ban', 'so_ban'] // Lấy tên bàn
-        }
+          attributes: ["id_ban", "ten_ban", "so_ban"],
+          required: false, // 🔴 Đơn chưa gán bàn vẫn hiện (Table = null)
+        },
       ],
-      order: [["ngay_dat", "DESC"]],
-    });
-    res.json({ success: true, data: reservations });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: "Lỗi lấy danh sách đặt bàn",
-      error: err.message,
-    });
-  }
+      order: [
+        ["ngay_dat", "DESC"],
+        ["gio_dat", "DESC"],
+      ],
+    });
+
+    return res.json({ success: true, data: reservations });
+  } catch (err) {
+    console.error("getAllReservations error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi lấy danh sách đặt bàn",
+      error: err.message,
+    });
+  }
 }
 
 /**
@@ -356,5 +362,45 @@ export async function getBusySlots(req, res) {
   } catch (err) {
     console.error("❌ Lỗi lấy lịch bàn:", err);
     res.status(500).json({ message: "Lỗi server" });
+  }
+}
+
+// 💡 MỚI: Tạo đặt bàn từ chatbot
+export async function createReservationFromChatbot(req, draft) {
+  const t = await sequelize.transaction();
+  try {
+    const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu } = draft;
+
+    const customer = await Customer.findOne({
+      where: { id_tk: req.user.id_tk },
+      transaction: t,
+    });
+    if (!customer) {
+      await t.rollback();
+      throw new Error("Không tìm thấy khách hàng cho tài khoản này");
+    }
+
+    const newR = await Reservation.create(
+      {
+        id_kh: customer.id_kh,
+        id_ban: null, // 👈 đặt qua chatbot: để trống, admin tự gán
+        ho_ten,
+        sdt,
+        ngay_dat,
+        gio_dat,
+        so_nguoi,
+        ghi_chu: `[CHATBOT] ${ghi_chu || ""}`,
+        trang_thai: "PENDING",
+        id_don_dat_truoc: null,
+      },
+      { transaction: t }
+    );
+
+    await t.commit();
+    return newR;
+  } catch (err) {
+    await t.rollback();
+    console.error("createReservationFromChatbot error:", err);
+    throw err;
   }
 }
