@@ -9,6 +9,8 @@ import { emitToUser } from "../socket.js";
 // 🧾 Import trực tiếp Voucher & VoucherRedemption (giống voucher.controller)
 import Voucher from "../models/Voucher.js";
 import VoucherRedemption from "../models/VoucherRedemption.js";
+// src/controllers/orders.controller.js
+import { getActivePromotionsNow, applyPromotionsToProduct } from "../utils/promotionPricing.js";
 
 // Lấy các model còn lại từ db
 const { Order, OrderDetail, Product, Customer, Account, Notification } = db;
@@ -193,19 +195,25 @@ export async function createOrder(req, res) {
     }
   }
 
-  // Tính subtotal từ items
+// Tính subtotal từ items (CÓ ÁP KHUYẾN MÃI)
   let calculatedTotal = 0;
   const productDetails = [];
 
   try {
     const productIds = items.map((item) => item.id_mon);
+
     const productsInDb = await Product.findAll({
       where: { id_mon: { [Op.in]: productIds } },
-      attributes: ["id_mon", "gia", "ten_mon"],
+      // cần cả id_dm để lọc theo danh mục nếu dùng target_type = 'CATEGORY'
+      attributes: ["id_mon", "gia", "ten_mon", "id_dm"],
     });
+
     const productMap = new Map(
-      productsInDb.map((p) => [p.id_mon, { gia: p.gia, ten_mon: p.ten_mon }])
+      productsInDb.map((p) => [p.id_mon, p.toJSON()])
     );
+
+    // 🔥 Lấy các khuyến mãi đang active ngay lúc này
+    const activePromos = await getActivePromotionsNow();
 
     for (const item of items) {
       const productInfo = productMap.get(item.id_mon);
@@ -215,12 +223,24 @@ export async function createOrder(req, res) {
           message: `Sản phẩm ID ${item.id_mon} không tồn tại.`,
         });
       }
-      const itemPrice = parseFloat(productInfo.gia);
+
+      // Áp khuyến mãi cho từng món
+      const priced = applyPromotionsToProduct(
+        {
+          id_mon: productInfo.id_mon,
+          id_dm: productInfo.id_dm,
+          gia: Number(productInfo.gia),
+        },
+        activePromos
+      );
+
+      const itemPrice = priced.gia_km; // giá sau khuyến mãi
       calculatedTotal += itemPrice * item.so_luong;
+
       productDetails.push({
         id_mon: item.id_mon,
         so_luong: item.so_luong,
-        gia: itemPrice,
+        gia: itemPrice, // lưu giá đã áp KM vào chi tiết đơn
         Product: { ten_mon: productInfo.ten_mon },
       });
     }

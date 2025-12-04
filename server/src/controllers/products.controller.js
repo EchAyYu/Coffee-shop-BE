@@ -1,37 +1,82 @@
 import Product from "../models/Product.js";
 import { Op } from "sequelize";
 
-// Lấy tất cả sản phẩm
+// 🔥 THÊM: helper khuyến mãi động
+import {
+  getActivePromotionsNow,
+  applyPromotionsToProduct,
+} from "../utils/promotionPricing.js";
+
+// ============================
+// Lấy tất cả sản phẩm (Admin + Public)
+// ============================
 export async function getAllProducts(req, res) {
   try {
-    // Lấy các tham số từ query string
     const { q, category, status } = req.query;
-    
+
     const where = {};
 
     // 1. Lọc theo tên sản phẩm (Search)
     if (q) {
       where.ten_mon = { [Op.like]: `%${q}%` };
     }
+
     // 2. Lọc theo danh mục
     if (category) {
       where.id_dm = category;
     }
-    // 3. 💡 LỌC MỚI: Lọc theo trạng thái
-    if (status === 'true' || status === 'false') {
-      where.trang_thai = (status === 'true');
-    }
-    // (Nếu status là "" hoặc không có, nó sẽ bỏ qua và lấy tất cả)
 
+    // 3. Lọc theo trạng thái
+    if (status === "true" || status === "false") {
+      where.trang_thai = status === "true";
+    }
+
+    // Lấy sản phẩm từ DB
     const products = await Product.findAll({ where });
-    res.json(products); // 💡 File adminApi.js của bạn đã được thiết kế để nhận 'res.json(products)'
+
+    // Nếu không có sản phẩm -> trả về sớm
+    if (!products.length) {
+      return res.json([]);
+    }
+
+    // 🔥 Lấy danh sách khuyến mãi đang active "ngay lúc này"
+    // (đúng ngày, đúng thứ, đúng giờ, và đang bật hiển thị)
+    const activePromos = await getActivePromotionsNow();
+
+    // Áp khuyến mãi vào từng sản phẩm
+    const result = products.map((p) => {
+      const raw = p.toJSON();
+
+      const priced = applyPromotionsToProduct(
+        {
+          id_mon: raw.id_mon,
+          id_dm: raw.id_dm,
+          gia: Number(raw.gia),
+        },
+        activePromos
+      );
+
+      return {
+        ...raw,
+        // Giữ nguyên giá gốc ở field `gia`
+        gia: raw.gia,
+        gia_goc: priced.gia_goc,
+        gia_km: priced.gia_km,
+        khuyen_mai_ap_dung: priced.khuyen_mai_ap_dung,
+      };
+    });
+
+    // ⚠️ Vẫn trả về "mảng thuần" cho hợp với FE hiện tại
+    res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error("getAllProducts error:", err);
     res.status(500).json({ message: "Server error" });
   }
 }
 
+// ============================
 // Lấy sản phẩm theo ID
+// ============================
 export async function getProductById(req, res) {
   try {
     const product = await Product.findByPk(req.params.id);
@@ -46,9 +91,8 @@ export async function getProductById(req, res) {
 // ✅ Thêm sản phẩm mới
 export async function createProduct(req, res) {
   try {
-    // Quay lại dùng req.body
-    const { id_dm, ten_mon, gia, mo_ta, anh, trang_thai } = req.body; 
-    
+    const { id_dm, ten_mon, gia, mo_ta, anh, trang_thai } = req.body;
+
     if (!id_dm || !ten_mon || !gia) {
       return res.status(400).json({ message: "Thiếu thông tin bắt buộc" });
     }
@@ -58,7 +102,7 @@ export async function createProduct(req, res) {
       ten_mon,
       gia,
       mo_ta,
-      anh, 
+      anh,
       trang_thai,
     });
 
@@ -69,15 +113,14 @@ export async function createProduct(req, res) {
   }
 }
 
-
 // ✅ Cập nhật sản phẩm
 export async function updateProduct(req, res) {
   try {
     const product = await Product.findByPk(req.params.id);
     if (!product) return res.status(404).json({ message: "Not found" });
 
-    await product.update(req.body); 
-    
+    await product.update(req.body);
+
     res.json(product);
   } catch (err) {
     console.error("Lỗi khi cập nhật sản phẩm:", err);

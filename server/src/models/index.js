@@ -13,6 +13,7 @@ import Account from "./Account.js";
 import Review from "./Reviews.js";
 import Notification from "./Notification.js"; 
 import ReviewReply from "./ReviewReply.js";
+import Promotion from "./Promotion.js";
 
 // ===============================
 // 🔗 Thiết lập quan hệ
@@ -77,6 +78,7 @@ const db = {
   Review,
   Notification, 
   ReviewReply,
+  Promotion,
 };
 
 export default db;
