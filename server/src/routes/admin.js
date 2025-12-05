@@ -50,10 +50,10 @@ import {
 } from "../controllers/voucher.controller.js";
 import { getAdminStats } from "../controllers/admin.stats.controller.js";
 import {
-  getAllPromotionsAdmin,
-  createPromotion,
-  updatePromotion,
-  deletePromotion,
+  getAdminPromotions,
+  createAdminPromotion,
+  updateAdminPromotion,
+  deleteAdminPromotion,
 } from "../controllers/promotions.controller.js";
 // Middleware: chỉ admin mới vào được
 r.use(requireAuth, requireAdmin);
@@ -110,9 +110,9 @@ r.delete("/vouchers/:id", asyncHandler(deleteVoucher));
 r.get("/stats", asyncHandler(getAdminStats));
 
 // QUẢN LÝ KHUYẾN MÃI (Admin)
-r.get("/promotions", asyncHandler(getAllPromotionsAdmin));
-r.post("/promotions", asyncHandler(createPromotion));
-r.put("/promotions/:id", asyncHandler(updatePromotion));
-r.delete("/promotions/:id", asyncHandler(deletePromotion));
 
+r.get("/promotions", /* requireAdmin, */ getAdminPromotions);
+r.post("/promotions", /* requireAdmin, */ createAdminPromotion);
+r.put("/promotions/:id", /* requireAdmin, */ updateAdminPromotion);
+r.delete("/promotions/:id", /* requireAdmin, */ deleteAdminPromotion);
 export default r;

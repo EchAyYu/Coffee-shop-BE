@@ -1,6 +1,7 @@
 // src/utils/promotionPricing.js
 import { Op } from "sequelize";
 import Promotion from "../models/Promotion.js";
+import PromotionProduct from "../models/PromotionProduct.js";
 
 // Kiểm tra now có nằm trong khoảng giờ promo hay không
 function isWithinTimeRange(now, promo) {
@@ -27,20 +28,48 @@ export async function getActivePromotionsNow() {
   const weekdayJs = now.getDay();
   const weekdayVN = weekdayJs === 0 ? 7 : weekdayJs; // 1-7
 
-  const promos = await Promotion.findAll({
+  // 1. Lấy khuyến mãi theo ngày/thứ
+  let promos = await Promotion.findAll({
     where: {
       hien_thi: true,
       ngay_bd: { [Op.lte]: now },
       ngay_kt: { [Op.gte]: now },
       [Op.or]: [
-        { lap_lai_thu: null },      // Áp dụng tất cả các ngày
-        { lap_lai_thu: weekdayVN }, // Hoặc chỉ đúng thứ hiện tại
+        { lap_lai_thu: null }, // Áp dụng tất cả các ngày
+        { lap_lai_thu: weekdayVN },
       ],
     },
   });
 
-  // Lọc thêm theo khung giờ
-  return promos.filter((promo) => isWithinTimeRange(now, promo));
+  // 2. Lọc thêm theo khung giờ
+  promos = promos.filter((promo) => isWithinTimeRange(now, promo));
+
+  // 3. Với những promo áp dụng theo PRODUCT, load thêm danh sách món (nhiều món)
+  const productScopePromoIds = promos
+    .filter((p) => p.target_type === "PRODUCT")
+    .map((p) => p.id_km);
+
+  if (productScopePromoIds.length > 0) {
+    const links = await PromotionProduct.findAll({
+      where: { id_km: productScopePromoIds },
+    });
+
+    // map: id_km -> [id_mon...]
+    const promoIdToProductIds = {};
+    for (const link of links) {
+      if (!promoIdToProductIds[link.id_km]) {
+        promoIdToProductIds[link.id_km] = [];
+      }
+      promoIdToProductIds[link.id_km].push(link.id_mon);
+    }
+
+    // Gắn productIds vào object promo để dùng sau
+    promos.forEach((promo) => {
+      promo.productIds = promoIdToProductIds[promo.id_km] || [];
+    });
+  }
+
+  return promos;
 }
 
 // product: object có { id_mon, id_dm, gia }
@@ -51,8 +80,29 @@ export function applyPromotionsToProduct(product, activePromos = []) {
 
   for (const promo of activePromos) {
     // 1. Check phạm vi áp dụng
-    if (promo.target_type === "PRODUCT" && promo.id_mon !== product.id_mon) {
-      continue;
+    if (promo.target_type === "PRODUCT") {
+      // Hỗ trợ 2 kiểu:
+      // - Kiểu cũ: promo.id_mon (1 món)
+      // - Kiểu mới: promo.productIds (nhiều món trong bảng khuyen_mai_mon)
+      const singleId = promo.id_mon;
+      const linkedIds = promo.productIds || [];
+
+      if (singleId) {
+        if (
+          singleId !== product.id_mon &&
+          !linkedIds.includes(product.id_mon)
+        ) {
+          continue;
+        }
+      } else {
+        if (linkedIds.length === 0) {
+          // có target_type=PRODUCT mà không gắn món -> bỏ qua
+          continue;
+        }
+        if (!linkedIds.includes(product.id_mon)) {
+          continue;
+        }
+      }
     }
 
     if (

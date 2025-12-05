@@ -286,11 +286,27 @@ export async function myVouchers(req, res) {
 export async function validateCode(req, res) {
   try {
     const id_tk = req.user?.id_tk || req.user?.id;
-    const { code, order_total } = req.body;
+    const { code, order_total, items } = req.body;
+
+    // 🛑 NEW RULE: Không cho dùng voucher nếu đơn hàng có sản phẩm đang khuyến mãi
+    if (Array.isArray(items)) {
+      const hasDiscountedProduct = items.some(
+        (it) => it.gia_km != null && Number(it.gia_km) < Number(it.gia_goc)
+      );
+
+      if (hasDiscountedProduct) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Voucher không áp dụng cho đơn hàng có sản phẩm đang khuyến mãi.",
+        });
+      }
+    }
 
     const redemption = await VoucherRedemption.findOne({
       where: { code, id_tk },
     });
+
     if (!redemption) {
       return res
         .status(404)
@@ -300,16 +316,14 @@ export async function validateCode(req, res) {
     if (redemption.status !== "active") {
       return res.status(400).json({
         success: false,
-        message: "Mã không còn hiệu lực (đã dùng hoặc hết hạn)",
+        message: "Mã không còn hiệu lực (đã dùng / hết hạn)",
       });
     }
 
     if (redemption.expires_at && new Date(redemption.expires_at) <= new Date()) {
       redemption.status = "expired";
       await redemption.save();
-      return res
-        .status(400)
-        .json({ success: false, message: "Mã đã hết hạn" });
+      return res.status(400).json({ success: false, message: "Mã đã hết hạn" });
     }
 
     const voucher = await Voucher.findByPk(redemption.voucher_id);
@@ -319,32 +333,36 @@ export async function validateCode(req, res) {
         .json({ success: false, message: "Voucher không hợp lệ" });
     }
 
+    // ----- Tính giảm giá -----
     const subtotal = Number(order_total || 0);
+
     if (subtotal < Number(voucher.min_order || 0)) {
       return res.status(400).json({
         success: false,
         message: `Chưa đạt giá trị tối thiểu ${Number(
           voucher.min_order
-        ).toLocaleString("vi-VN")} ₫`,
+        ).toLocaleString("vi-VN")}₫`,
       });
     }
 
-    let discount = 0;
-    if (voucher.discount_type === "fixed") {
-      discount = Number(voucher.discount_value);
-    } else {
-      discount = (subtotal * Number(voucher.discount_value)) / 100;
-    }
+    let discount =
+      voucher.discount_type === "fixed"
+        ? Number(voucher.discount_value)
+        : (subtotal * Number(voucher.discount_value)) / 100;
+
     const cap = voucher.max_discount
       ? Number(voucher.max_discount)
       : discount;
+
     discount = Math.min(discount, cap, subtotal);
 
     res.json({ success: true, data: { code, discount } });
   } catch (e) {
-    res.status(500).json({ success: false, message: "Lỗi kiểm tra mã." });
+    console.error(e);
+    res.status(500).json({ success: false, message: "Lỗi kiểm tra voucher." });
   }
 }
+// 3) Cấp voucher chào mừng cho user mới
 
 export async function grantWelcomeVoucherForNewUser(id_tk) {
   try {

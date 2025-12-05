@@ -9,8 +9,12 @@ import { emitToUser } from "../socket.js";
 // 🧾 Import trực tiếp Voucher & VoucherRedemption (giống voucher.controller)
 import Voucher from "../models/Voucher.js";
 import VoucherRedemption from "../models/VoucherRedemption.js";
-// src/controllers/orders.controller.js
-import { getActivePromotionsNow, applyPromotionsToProduct } from "../utils/promotionPricing.js";
+
+// Áp dụng khuyến mãi theo thời gian, danh mục, món
+import {
+  getActivePromotionsNow,
+  applyPromotionsToProduct,
+} from "../utils/promotionPricing.js";
 
 // Lấy các model còn lại từ db
 const { Order, OrderDetail, Product, Customer, Account, Notification } = db;
@@ -27,7 +31,6 @@ const ORDER_STATUS_VI = {
   cancelled: "Đã hủy",
 };
 
-// Helper lấy tên tiếng Việt
 const getStatusVi = (status) => {
   return ORDER_STATUS_VI[status?.toLowerCase()] || status;
 };
@@ -152,7 +155,7 @@ export async function getMyOrders(req, res) {
 }
 
 /**
- * 🛒 Tạo đơn hàng (có áp dụng voucher)
+ * 🛒 Tạo đơn hàng (có áp dụng khuyến mãi & voucher)
  */
 export async function createOrder(req, res) {
   const {
@@ -195,16 +198,16 @@ export async function createOrder(req, res) {
     }
   }
 
-// Tính subtotal từ items (CÓ ÁP KHUYẾN MÃI)
+  // ===== Tính subtotal (đã áp khuyến mãi) =====
   let calculatedTotal = 0;
   const productDetails = [];
+  let hasDiscountedItem = false; // ⭐ bất kỳ sản phẩm nào có khuyến mãi?
 
   try {
     const productIds = items.map((item) => item.id_mon);
 
     const productsInDb = await Product.findAll({
       where: { id_mon: { [Op.in]: productIds } },
-      // cần cả id_dm để lọc theo danh mục nếu dùng target_type = 'CATEGORY'
       attributes: ["id_mon", "gia", "ten_mon", "id_dm"],
     });
 
@@ -224,17 +227,25 @@ export async function createOrder(req, res) {
         });
       }
 
+      const giaGoc = Number(productInfo.gia);
+
       // Áp khuyến mãi cho từng món
       const priced = applyPromotionsToProduct(
         {
           id_mon: productInfo.id_mon,
           id_dm: productInfo.id_dm,
-          gia: Number(productInfo.gia),
+          gia: giaGoc,
         },
         activePromos
       );
 
-      const itemPrice = priced.gia_km; // giá sau khuyến mãi
+      const itemPrice = Number(priced.gia_km ?? giaGoc);
+
+      // Nếu giá sau khuyến mãi < giá gốc => món này đang được KM
+      if (itemPrice < giaGoc) {
+        hasDiscountedItem = true;
+      }
+
       calculatedTotal += itemPrice * item.so_luong;
 
       productDetails.push({
@@ -251,12 +262,21 @@ export async function createOrder(req, res) {
       .json({ success: false, message: "Lỗi kiểm tra sản phẩm." });
   }
 
-  // Xử lý voucher
+  // ===== Xử lý voucher =====
   let discount = 0;
   let redemptionToUse = null;
 
   try {
     if (voucher_code) {
+      // ⛔ Không cho dùng voucher nếu giỏ có sản phẩm đang khuyến mãi
+      if (hasDiscountedItem) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Đơn hàng có sản phẩm đang được khuyến mãi nên không thể áp dụng voucher.",
+        });
+      }
+
       if (!user?.id_tk) {
         return res
           .status(401)
@@ -293,7 +313,7 @@ export async function createOrder(req, res) {
           .json({ success: false, message: "Mã voucher đã hết hạn." });
       }
 
-      // 2) Lấy voucher mẫu (không check active để mã đã phát vẫn dùng được)
+      // 2) Lấy voucher mẫu
       const voucher = await Voucher.findByPk(redemptionToUse.voucher_id);
       if (!voucher) {
         return res.status(400).json({
@@ -329,7 +349,7 @@ export async function createOrder(req, res) {
     });
   }
 
-  // Tạo đơn & chi tiết đơn
+  // ===== Tạo đơn & chi tiết đơn =====
   let newOrder;
   try {
     newOrder = await Order.create({
@@ -393,7 +413,6 @@ export async function createOrder(req, res) {
       .json({ success: false, message: "Lỗi tạo đơn hàng." });
   }
 }
-
 /**
  * 🏷️ Lấy chi tiết đơn (Fix lỗi crash)
  */
