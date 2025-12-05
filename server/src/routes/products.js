@@ -6,6 +6,10 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
 import db from "../models/index.js";
 import { Op } from "sequelize";
+import {
+  getActivePromotionsNow,
+  applyPromotionsToProduct,
+} from "../utils/promotionPricing.js";
 
 const { Product } = db;
 const router = express.Router();
@@ -66,29 +70,51 @@ router.get(
     const limit = req.query.limit || 12;
     const offset = (page - 1) * limit;
 
-    // ✅ Dùng đúng tên cột trong DB: ten_mon
-    // ✅ Bộ lọc nâng cao
     const where = {};
-    
+
     if (q) {
       where.ten_mon = { [Op.like]: `%${q}%` };
     }
-    
+
     if (req.query.categoryId) {
-      where.id_dm = req.query.categoryId; // lọc theo danh mục
+      where.id_dm = req.query.categoryId;
     }
 
-    // ✅ FIX: Thêm query database
+    // 1. Lấy danh sách sản phẩm như cũ
     const { rows, count } = await Product.findAndCountAll({
       where,
       limit,
       offset,
-      order: [["id_mon", "DESC"]], // Sản phẩm mới nhất trước
+      order: [["id_mon", "DESC"]],
+    });
+
+    // 2. Lấy các khuyến mãi đang active tại thời điểm hiện tại
+    const activePromos = await getActivePromotionsNow();
+
+    // 3. Áp khuyến mãi vào từng sản phẩm
+    const pricedRows = rows.map((prod) => {
+      const raw = prod.toJSON();
+
+      const priced = applyPromotionsToProduct(
+        {
+          id_mon: raw.id_mon,
+          id_dm: raw.id_dm,
+          gia: Number(raw.gia),
+        },
+        activePromos
+      );
+
+      return {
+        ...raw,
+        gia_goc: priced.gia_goc,
+        gia_km: priced.gia_km,
+        khuyen_mai_ap_dung: priced.khuyen_mai_ap_dung,
+      };
     });
 
     res.json({
       success: true,
-      data: rows,
+      data: pricedRows,
       pagination: {
         total: count,
         page,
@@ -124,11 +150,33 @@ router.get(
   validate,
   asyncHandler(async (req, res) => {
     const prod = await Product.findByPk(req.params.id);
-    if (!prod)
+    if (!prod) {
       return res
         .status(404)
         .json({ success: false, message: "Không tìm thấy sản phẩm" });
-    res.json({ success: true, data: prod });
+    }
+
+    // Áp khuyến mãi cho sản phẩm đơn lẻ
+    const activePromos = await getActivePromotionsNow();
+    const raw = prod.toJSON();
+
+    const priced = applyPromotionsToProduct(
+      {
+        id_mon: raw.id_mon,
+        id_dm: raw.id_dm,
+        gia: Number(raw.gia),
+      },
+      activePromos
+    );
+
+    const merged = {
+      ...raw,
+      gia_goc: priced.gia_goc,
+      gia_km: priced.gia_km,
+      khuyen_mai_ap_dung: priced.khuyen_mai_ap_dung,
+    };
+
+    res.json({ success: true, data: merged });
   })
 );
 
@@ -182,7 +230,6 @@ router.post(
   requireAuth,
   authorizeRoles("admin"),
   [
-    // ✅ Map đúng schema bảng "mon"
     body("ten_mon").notEmpty().withMessage("Tên sản phẩm là bắt buộc"),
     body("gia").isFloat({ min: 0 }).withMessage("Giá phải lớn hơn 0"),
     body("id_dm").isInt().withMessage("Danh mục không hợp lệ"),
@@ -253,10 +300,11 @@ router.put(
   validate,
   asyncHandler(async (req, res) => {
     const prod = await Product.findByPk(req.params.id);
-    if (!prod)
+    if (!prod) {
       return res
         .status(404)
         .json({ success: false, message: "Không tìm thấy sản phẩm" });
+    }
     await prod.update(req.body);
     res.json({ success: true, data: prod });
   })
@@ -291,10 +339,11 @@ router.delete(
   validate,
   asyncHandler(async (req, res) => {
     const prod = await Product.findByPk(req.params.id);
-    if (!prod)
+    if (!prod) {
       return res
         .status(404)
         .json({ success: false, message: "Không tìm thấy sản phẩm" });
+    }
     await prod.destroy();
     res.json({ success: true, message: "Đã xóa sản phẩm" });
   })
