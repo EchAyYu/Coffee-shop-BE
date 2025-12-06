@@ -26,7 +26,7 @@ const Promotion = sequelize.define("Promotion", {
     defaultValue: 0,
   },
 
-  // 🔥 MỚI: loại khuyến mãi
+  // Loại khuyến mãi
   // PERCENT: giảm %
   // FIXED_PRICE: đồng giá (gia_dong)
   loai_km: {
@@ -35,16 +35,16 @@ const Promotion = sequelize.define("Promotion", {
     defaultValue: "PERCENT",
   },
 
-  // 🔥 MỚI: giá đồng nếu loai_km = FIXED_PRICE
+  // Giá đồng nếu loai_km = FIXED_PRICE
   gia_dong: {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
 
-  // 🔥 MỚI: phạm vi áp dụng
+  // Phạm vi áp dụng
   // ALL: tất cả sản phẩm
   // CATEGORY: 1 danh mục (id_danh_muc)
-  // PRODUCT: 1 món cụ thể (id_mon)
+  // PRODUCT: 1 hoặc nhiều món cụ thể (id_mon, PromotionProduct)
   target_type: {
     type: DataTypes.ENUM("ALL", "CATEGORY", "PRODUCT"),
     allowNull: false,
@@ -68,7 +68,7 @@ const Promotion = sequelize.define("Promotion", {
     allowNull: false,
   },
 
-  // 🔥 MỚI: giới hạn theo giờ trong ngày (có thể để null = cả ngày)
+  // Giới hạn theo giờ trong ngày (có thể để null = cả ngày)
   gio_bd: {
     type: DataTypes.TIME,
     allowNull: true,
@@ -82,7 +82,17 @@ const Promotion = sequelize.define("Promotion", {
     type: DataTypes.TINYINT, // 1–7: 1=Thứ 2, ..., 7=CN
     allowNull: true,
   },
+
   hien_thi: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+
+  // ✅ MỚI: khuyến mãi có áp dụng trực tiếp vào giá món không
+  // true  => dùng trong tính giá (giảm giá sản phẩm)
+  // false => chỉ hiển thị banner/thông tin, KHÔNG đổi giá
+  ap_dung_gia: {
     type: DataTypes.BOOLEAN,
     allowNull: false,
     defaultValue: true,

@@ -110,6 +110,7 @@ export async function createAdminPromotion(req, res) {
       gio_bd,
       gio_kt,
       hien_thi,
+      ap_dung_gia,   // ✅ MỚI
       button_text,
       button_link,
     } = req.body;
@@ -146,6 +147,11 @@ export async function createAdminPromotion(req, res) {
         gio_kt: gio_kt || null,
 
         hien_thi: hien_thi !== undefined ? !!hien_thi : true,
+
+        // ✅ MỚI: default true nếu không gửi lên
+        ap_dung_gia:
+          ap_dung_gia !== undefined ? !!ap_dung_gia : true,
+
         button_text: button_text || null,
         button_link: button_link || null,
       },
@@ -226,6 +232,7 @@ export async function updateAdminPromotion(req, res) {
       gio_bd,
       gio_kt,
       hien_thi,
+      ap_dung_gia,   // ✅ MỚI
       button_text,
       button_link,
     } = req.body;
@@ -263,6 +270,11 @@ export async function updateAdminPromotion(req, res) {
         gio_kt: gio_kt || null,
 
         hien_thi: hien_thi !== undefined ? !!hien_thi : promo.hien_thi,
+
+        // ✅ MỚI
+        ap_dung_gia:
+          ap_dung_gia !== undefined ? !!ap_dung_gia : promo.ap_dung_gia,
+
         button_text: button_text ?? promo.button_text,
         button_link: button_link ?? promo.button_link,
       },

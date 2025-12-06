@@ -736,6 +736,28 @@ export async function exportAdminOrdersCsv(req, res) {
   }
 }
 
+/**
+ * 📊 Thống kê đơn hàng (Admin)
+ */
+export async function getAdminOrderStats(req, res) {
+  // Ví dụ: lấy thống kê đơn hàng (tổng số, tổng doanh thu, v.v...)
+  try {
+    const totalOrders = await Order.count();
+    const totalRevenue = await Order.sum("tong_tien");
+    
+    res.json({ 
+      success: true, 
+      stats: {
+        totalOrders,
+        totalRevenue,
+      }
+    });
+  } catch (err) {
+    console.error("getAdminOrderStats error:", err);
+    res.status(500).json({ success: false, message: "Lỗi máy chủ khi lấy thống kê đơn hàng." });
+  }
+}
+
 
 
 

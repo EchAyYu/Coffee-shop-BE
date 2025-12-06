@@ -20,7 +20,7 @@ function isWithinTimeRange(now, promo) {
   return now >= start && now <= end;
 }
 
-// 🔥 Lấy tất cả khuyến mãi đang active "ngay lúc này"
+// 🔥 Lấy tất cả khuyến mãi đang active "ngay lúc này" dùng để ÁP GIÁ
 export async function getActivePromotionsNow() {
   const now = new Date();
 
@@ -32,6 +32,8 @@ export async function getActivePromotionsNow() {
   let promos = await Promotion.findAll({
     where: {
       hien_thi: true,
+      ap_dung_gia: true, // ✅ chỉ khuyến mãi có bật áp dụng giá mới dùng để tính giá
+
       ngay_bd: { [Op.lte]: now },
       ngay_kt: { [Op.gte]: now },
       [Op.or]: [
