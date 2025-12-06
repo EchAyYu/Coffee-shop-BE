@@ -11,12 +11,32 @@ import Order from "../models/Order.js";
 import OrderDetail from "../models/OrderDetail.js";
 import Product from "../models/Product.js";
 import sequelize from "../utils/db.js";
-import { Op } from "sequelize";
+import { Op, fn, col } from "sequelize";
 import db from "../models/index.js";
+
+import {
+  getCurrentWeekRange,
+  getCurrentMonthRange,
+} from "../utils/dateRange.js";
 
 // Helper: validate ngày / giờ
 const isValidDateString = (str) => /^\d{4}-\d{2}-\d{2}$/.test(str || "");
 const isValidTimeString = (str) => /^\d{2}:\d{2}$/.test(str || "");
+
+// 🔹 Các trạng thái được tính là "thành công" / "đã hủy" cho THỐNG KÊ đặt bàn
+// ❗ Không thay đổi trạng thái bạn đang lưu trong DB.
+const SUCCESS_RESERVATION_STATUSES = [
+  "CONFIRMED",
+  "DONE",
+  "ARRIVED",
+  "ĐÃ XÁC NHẬN",
+  "ĐÃ HOÀN THÀNH",
+];
+
+const CANCELLED_RESERVATION_STATUSES = [
+  "CANCELLED",
+  "ĐÃ HỦY",
+];
 
 // 💡 --- Helper Function: Hàm gửi thông báo (Nội bộ) ---
 async function sendReservationNotification(reservation, newStatusLabel) {
@@ -246,9 +266,7 @@ export async function getReservationById(req, res) {
           include: [
             {
               model: OrderDetail,
-              include: [
-                { model: Product, attributes: ["ten_mon"] },
-              ],
+              include: [{ model: Product, attributes: ["ten_mon"] }],
             },
           ],
         },
@@ -373,6 +391,7 @@ export async function getBusySlots(req, res) {
       },
       attributes: ["gio_dat", "trang_thai"],
       order: [["gio_dat", "ASC"]],
+
     });
 
     console.log(`✅ Tìm thấy ${bookings.length} đơn.`);
@@ -432,5 +451,180 @@ export async function createReservationFromChatbot(req, draft) {
     await t.rollback();
     console.error("createReservationFromChatbot error:", err);
     throw err;
+  }
+}
+/**
+ * 📊 Thống kê đặt bàn cho Admin theo tuần / tháng
+ */
+export async function getReservationStats(req, res) {
+  try {
+    // CHỈ CHO PHÉP: week | month
+    const rawPeriod = (req.query.period || "month").toLowerCase();
+    const period = rawPeriod === "week" ? "week" : "month";
+
+    let range;
+    if (period === "week") range = getCurrentWeekRange();
+    else range = getCurrentMonthRange();
+
+    const { start, end } = range;
+
+    const rows = await Reservation.findAll({
+      attributes: ["trang_thai", [fn("COUNT", col("id_datban")), "count"] ],
+      where: {
+        ngay_dat: { [Op.between]: [start, end] },
+      },
+      group: ["trang_thai"],
+      raw: true,
+    });
+
+    const totalReservations = rows.reduce(
+      (sum, r) => sum + Number(r.count || 0),
+      0
+    );
+
+    const successfulReservations = rows
+      .filter((r) =>
+        SUCCESS_RESERVATION_STATUSES.includes(
+          (r.trang_thai || "").toUpperCase()
+        )
+      )
+      .reduce((sum, r) => sum + Number(r.count || 0), 0);
+
+    const cancelledReservations = rows
+      .filter((r) =>
+        CANCELLED_RESERVATION_STATUSES.includes(
+          (r.trang_thai || "").toUpperCase()
+        )
+      )
+      .reduce((sum, r) => sum + Number(r.count || 0), 0);
+
+    const successPercent = totalReservations
+      ? Math.round((successfulReservations / totalReservations) * 100)
+      : 0;
+
+    const cancelledPercent = totalReservations
+      ? Math.round((cancelledReservations / totalReservations) * 100)
+      : 0;
+
+    res.json({
+      success: true,
+      data: {
+        period,                // "week" | "month"
+        range: { start, end }, // nếu sau này bạn muốn tính thêm gì cũng dễ
+        totalReservations,
+        successfulReservations,
+        cancelledReservations,
+        successPercent,
+        cancelledPercent,
+        byStatus: rows,
+      },
+    });
+  } catch (err) {
+    console.error("getReservationStats error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi lấy thống kê đặt bàn.",
+    });
+  }
+}
+
+// ===== Helper: escape CSV =====
+function escapeReservationCsv(value) {
+  if (value === null || value === undefined) return "";
+  const str = String(value).replace(/"/g, '""');
+  if (/[",\n]/.test(str)) {
+    return `"${str}"`;
+  }
+  return str;
+}
+
+/**
+ * 📤 Xuất danh sách đặt bàn theo kỳ (week / month / year) dưới dạng CSV
+ * Đường dẫn gợi ý: GET /api/admin/reservations/export?period=month
+ */
+export async function exportReservationStatsCsv(req, res) {
+  try {
+    const period = (req.query.period || "month").toLowerCase();
+    let range;
+    if (period === "month") range = getCurrentMonthRange();
+    else if (period === "year") range = getCurrentYearRange();
+    else range = getCurrentWeekRange();
+
+    const { start, end } = range;
+
+    const rows = await Reservation.findAll({
+      where: {
+        ngay_dat: { [Op.between]: [start, end] },
+      },
+      attributes: [
+        "id_datban",
+        "ngay_dat",
+        "gio_dat",
+        "so_nguoi",
+        "trang_thai",
+      ],
+      include: [
+        {
+          model: Customer,
+          attributes: ["ho_ten", "email", "sdt"],
+          required: false,
+        },
+        {
+          model: Table,
+          attributes: ["ten_ban", "so_ban"],
+          required: false,
+        },
+      ],
+      order: [
+        ["ngay_dat", "ASC"],
+        ["gio_dat", "ASC"],
+      ],
+    });
+
+    const esc = (val) =>
+      `"${String(val ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+
+    let csv =
+      "ID đặt bàn,Ngày đặt,Giờ,Khách hàng,Email,SĐT,Số người,Bàn,Trạng thái\n";
+
+    for (const r of rows) {
+      const d = r.ngay_dat ? new Date(r.ngay_dat) : null;
+      const dateStr = d ? d.toISOString().slice(0, 10) : "";
+      const timeStr = r.gio_dat || "";
+
+      const c = r.Customer || {};
+      const t = r.Table || {};
+      const tableLabel = t.ten_ban || t.so_ban || "";
+
+      const line = [
+        esc(r.id_datban),
+        esc(dateStr),
+        esc(timeStr),
+        esc(c.ho_ten || ""),
+        esc(c.email || ""),
+        esc(c.sdt || ""),
+        esc(r.so_nguoi || 0),
+        esc(tableLabel),
+        esc(r.trang_thai || ""),
+      ].join(",");
+
+      csv += line + "\n";
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const filename = `reservations_${period}_${todayStr}.csv`;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`
+    );
+    res.send("\uFEFF" + csv);
+  } catch (err) {
+    console.error("exportReservationStatsCsv error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi xuất Excel đặt bàn.",
+    });
   }
 }

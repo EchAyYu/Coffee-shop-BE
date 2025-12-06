@@ -15,12 +15,16 @@ import { initSocket } from "./socket.js";
 
 // --- Config & Utils ---
 import { config } from "./config/config.js";
-import sequelize from "./utils/db.js"; 
+import sequelize from "./utils/db.js";
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 import { swaggerDocs } from "./config/swagger.js";
 
 // --- Middleware bảo vệ ---
-import { requireAuth, requireAdmin, authorizeRoles } from "./middlewares/authMiddleware.js";
+import {
+  requireAuth,
+  requireAdmin,
+  authorizeRoles,
+} from "./middlewares/authMiddleware.js";
 import { globalLimiter } from "./middlewares/rateLimit.js";
 
 // --- Routers (bắt buộc phải có) ---
@@ -44,11 +48,8 @@ import adminReviewsRouter from "./routes/admin.reviews.js";
 import chatbotRouter from "./routes/chatbot.js";
 import promotionsRoutes from "./routes/promotions.js";
 
-
-// 💡 SỬA LỖI TẠI ĐÂY:
-// Xóa dòng: import Upload from "./models/Upload.js"; (File này không tồn tại)
-// Thêm dòng này:
-import uploadRouter from "./routes/uploads.js"; 
+import { initCleanupJobs } from "./job/cleanupOldData.js";
+import uploadRouter from "./routes/uploads.js";
 
 // --- Khởi tạo Express ---
 const app = express();
@@ -76,19 +77,19 @@ const ALLOW_ORIGINS = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true); 
+      if (!origin) return callback(null, true);
       if (ALLOW_ORIGINS.includes(origin)) return callback(null, true);
       console.warn("❌ Blocked by CORS:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
-    credentials: true, 
+    credentials: true,
   })
 );
 
 // ===============================
 // 📦 BODY PARSERS & COOKIES
 // ===============================
-app.use(express.json({ limit: "5mb" })); // Tăng giới hạn lên 5mb để upload base64 nếu cần
+app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // ===============================
@@ -102,7 +103,7 @@ app.use("/api/", globalLimiter);
 app.use("/api/auth", authRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/categories", categoriesRouter);
-app.use("/api/reviews", reviewsRouter); 
+app.use("/api/reviews", reviewsRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/tables", tablesRouter);
 app.use("/api/home-content", homeContentRoutes);
@@ -112,24 +113,39 @@ app.use("/api/orders", ordersRouter);
 app.use("/api/reservations", reservationsRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/employees", employeesRouter);
-app.use("/api/admin/orders", adminOrdersRoute);
+
+// Admin Orders (cho admin + employee)
+app.use(
+  "/api/admin/orders",
+  requireAuth,
+  authorizeRoles("admin", "employee"),
+  adminOrdersRoute
+);
+
+// Admin Reviews
+app.use(
+  "/api/admin/reviews",
+  requireAuth,
+  authorizeRoles("admin", "employee"),
+  adminReviewsRouter
+);
+
+// Admin main router (đã bao gồm: customers, products, categories, employees,
+// orders-stats, orders/export, reservations, reservations/stats, reservations/export, vouchers, stats, promotions...)
 app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
+
 app.use("/api/chatbot", chatbotRouter);
 app.use("/api/promotions", promotionsRoutes);
-// 💡 SỬA LỖI TẠI ĐÂY: Thay thế express.static bằng uploadRouter
-// (Dòng cũ: app.use("/api/uploads", express.static(...)) -> Xóa hoặc comment lại)
-app.use("/api/uploads", uploadRouter); 
+app.use("/api/uploads", uploadRouter);
 
-app.use("/api/admin/orders", requireAuth, authorizeRoles("admin", "employee"), adminOrdersRoute);
-app.use("/api/admin/reviews", requireAuth, authorizeRoles("admin", "employee"), adminReviewsRouter);
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
-
 
 // ===============================
 // 📦 ROUTES TÙY CHỌN (IMPORT ĐỘNG)
 // ===============================
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 async function mountIfExists(urlPrefix, relModulePath, middlewares = []) {
   const absPath = path.resolve(__dirname, relModulePath.replace("./", ""));
   if (!fs.existsSync(absPath)) {
@@ -140,7 +156,9 @@ async function mountIfExists(urlPrefix, relModulePath, middlewares = []) {
     const mod = await import(relModulePath);
     const router = mod.default;
     if (!router) {
-      console.warn(`ℹ️  Route "${relModulePath}" không export default, bỏ qua.`);
+      console.warn(
+        `ℹ️  Route "${relModulePath}" không export default, bỏ qua.`
+      );
       return;
     }
     if (middlewares.length) {
@@ -150,13 +168,26 @@ async function mountIfExists(urlPrefix, relModulePath, middlewares = []) {
     }
     console.log(`✅ Mounted route ${urlPrefix} from ${relModulePath}`);
   } catch (e) {
-    console.error(`❌ Lỗi import route ${relModulePath}:`, e?.message || e);
+    console.error(
+      `❌ Lỗi import route ${relModulePath}:`,
+      e?.message || e
+    );
   }
 }
-await mountIfExists("/api/loyalty", "./routes/loyalty.js"); 
-await mountIfExists("/api/vouchers", "./routes/vouchers.js", [requireAuth, authorizeRoles("customer")]);
-await mountIfExists("/api/voucher-redemptions", "./routes/voucherRedemptions.js", [requireAuth, authorizeRoles("customer")]);
-await mountIfExists("/api/notifications", "./routes/notifications.js", [requireAuth]);
+
+await mountIfExists("/api/loyalty", "./routes/loyalty.js");
+await mountIfExists("/api/vouchers", "./routes/vouchers.js", [
+  requireAuth,
+  authorizeRoles("customer"),
+]);
+await mountIfExists(
+  "/api/voucher-redemptions",
+  "./routes/voucherRedemptions.js",
+  [requireAuth, authorizeRoles("customer")]
+);
+await mountIfExists("/api/notifications", "./routes/notifications.js", [
+  requireAuth,
+]);
 
 // ===============================
 // 📜 Swagger API docs
@@ -190,12 +221,12 @@ export const startServer = async () => {
       console.log(`🔌 Socket.io initialized.`);
       console.log(`🌐 Allowed Origins: ${ALLOW_ORIGINS.join(", ")}`);
     });
-
   } catch (err) {
     console.error("❌ Database connection error:", err);
   }
 };
 
+initCleanupJobs();
 export default app;
 
 startServer();

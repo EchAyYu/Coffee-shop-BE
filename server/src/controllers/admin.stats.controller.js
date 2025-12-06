@@ -1,4 +1,4 @@
-// src/controllers/admin.stats.controller.js (VERSION 3 - HOÀN CHỈNH)
+// src/controllers/admin.stats.controller.js (VERSION 4 - NÂNG CẤP TUẦN/THÁNG)
 import { Op, fn, col, literal } from "sequelize";
 import sequelize from "../utils/db.js";
 import Order from "../models/Order.js";
@@ -7,33 +7,23 @@ import Product from "../models/Product.js";
 import Customer from "../models/Customer.js";
 import Reservation from "../models/Reservation.js";
 
-// Helper để lấy ngày hôm nay
-const getTodayRange = () => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
-};
+import {
+  getTodayRange,
+  getPastDaysRange,
+  getCurrentWeekRange,
+  getCurrentMonthRange,
+} from "../utils/dateRange.js";
 
-// Helper để lấy 7 ngày qua
-const getPastDaysRange = (days = 7) => {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - (days - 1));
-  start.setHours(0, 0, 0, 0);
-  return { start, end };
-};
-
-// Trạng thái đơn hàng thành công (để tính doanh thu)
+// Trạng thái đơn hàng thành công (để tính doanh thu / top sản phẩm / top KH)
 const SUCCESS_ORDER_STATUSES = ["completed", "done", "paid", "shipped", "confirmed"];
 
 export const getAdminStats = async (req, res) => {
   try {
     const today = getTodayRange();
     const last7Days = getPastDaysRange(7);
+    const currentWeek = getCurrentWeekRange();
+    const currentMonth = getCurrentMonthRange();
 
-    // Chạy song song tất cả các truy vấn
     const [
       kpiResult,
       revenueOverTime,
@@ -45,14 +35,37 @@ export const getAdminStats = async (req, res) => {
       customerStats,
       newCustomersOverTime,
 
+      // 🔹 MỚI: top theo tuần/tháng
+      topSellingProductsWeek,
+      topSellingProductsMonth,
+      topCustomersWeek,
+      topCustomersMonth,
     ] = await Promise.all([
       // 1. KPI Doanh thu & Đơn hàng
       Order.findOne({
         attributes: [
           [fn("SUM", col("tong_tien")), "totalRevenue"],
           [fn("COUNT", col("id_don")), "totalOrders"],
-          [fn("SUM", literal(`CASE WHEN trang_thai IN (${SUCCESS_ORDER_STATUSES.map(s => `'${s}'`).join(',')}) AND ngay_dat BETWEEN '${today.start.toISOString()}' AND '${today.end.toISOString()}' THEN tong_tien ELSE 0 END`)), "todayRevenue"],
-          [fn("COUNT", literal(`CASE WHEN ngay_dat BETWEEN '${today.start.toISOString()}' AND '${today.end.toISOString()}' THEN id_don ELSE NULL END`)), "todayOrders"],
+          [
+            fn(
+              "SUM",
+              literal(
+                `CASE WHEN trang_thai IN (${SUCCESS_ORDER_STATUSES.map(
+                  (s) => `'${s}'`
+                ).join(",")}) AND ngay_dat BETWEEN '${today.start.toISOString()}' AND '${today.end.toISOString()}' THEN tong_tien ELSE 0 END`
+              )
+            ),
+            "todayRevenue",
+          ],
+          [
+            fn(
+              "COUNT",
+              literal(
+                `CASE WHEN ngay_dat BETWEEN '${today.start.toISOString()}' AND '${today.end.toISOString()}' THEN id_don ELSE NULL END`
+              )
+            ),
+            "todayOrders",
+          ],
         ],
         where: { trang_thai: SUCCESS_ORDER_STATUSES },
         raw: true,
@@ -73,7 +86,7 @@ export const getAdminStats = async (req, res) => {
         raw: true,
       }),
 
-      // 3. Top 5 Sản phẩm
+      // 3. Top 5 Sản phẩm (tổng)
       OrderDetail.findAll({
         attributes: [
           "id_mon",
@@ -93,6 +106,7 @@ export const getAdminStats = async (req, res) => {
       Order.findAll({
         attributes: ["trang_thai", [fn("COUNT", col("id_don")), "count"]],
         group: ["trang_thai"],
+        raw: true,
       }),
 
       // 5. Đơn hàng gần đây
@@ -101,8 +115,8 @@ export const getAdminStats = async (req, res) => {
         order: [["ngay_dat", "DESC"]],
         attributes: ["id_don", "ho_ten_nhan", "tong_tien", "trang_thai", "ngay_dat"],
       }),
-      
-      // 6. Top 5 Khách hàng
+
+      // 6. Top 5 Khách hàng (tổng)
       Order.findAll({
         attributes: [
           "id_kh",
@@ -111,35 +125,51 @@ export const getAdminStats = async (req, res) => {
         ],
         where: {
           trang_thai: SUCCESS_ORDER_STATUSES,
-          id_kh: { [Op.ne]: null }
+          id_kh: { [Op.ne]: null },
         },
-        include: [{
-          model: Customer,
-          attributes: ["ho_ten", "email", "anh"],
-        }],
-        group: ["Order.id_kh", "Customer.id_kh", "Customer.ho_ten", "Customer.email", "Customer.anh"],
+        include: [
+          {
+            model: Customer,
+            attributes: ["id_kh", "ho_ten", "email", "anh"],
+          },
+        ],
+        group: [
+          "Order.id_kh",
+          "Customer.id_kh",
+          "Customer.ho_ten",
+          "Customer.email",
+          "Customer.anh",
+        ],
         order: [[col("total_spent"), "DESC"]],
         limit: 5,
         subQuery: false,
       }),
-      
+
       // 7. Đặt bàn chờ
       Reservation.findAll({
         where: { trang_thai: "PENDING" },
         order: [["ngay_dat", "ASC"]],
         limit: 5,
       }),
-      
-      // 8. KPI Khách hàng (Sử dụng 'ngay_tao')
+
+      // 8. KPI Khách hàng
       Customer.findOne({
-         attributes: [
-            [fn("COUNT", col("id_kh")), "totalCustomers"],
-            [fn("COUNT", literal(`CASE WHEN ngay_tao BETWEEN '${today.start.toISOString()}' AND '${today.end.toISOString()}' THEN id_kh ELSE NULL END`)), "todayCustomers"]
-         ],
-         raw: true,
+        attributes: [
+          [fn("COUNT", col("id_kh")), "totalCustomers"],
+          [
+            fn(
+              "COUNT",
+              literal(
+                `CASE WHEN ngay_tao BETWEEN '${today.start.toISOString()}' AND '${today.end.toISOString()}' THEN id_kh ELSE NULL END`
+              )
+            ),
+            "todayCustomers",
+          ],
+        ],
+        raw: true,
       }),
 
-      // 9. Biểu đồ Khách hàng mới 7 ngày (Sử dụng 'ngay_tao')
+      // 9. Biểu đồ Khách hàng mới 7 ngày
       Customer.findAll({
         attributes: [
           [fn("DATE", col("ngay_tao")), "date"],
@@ -152,31 +182,143 @@ export const getAdminStats = async (req, res) => {
         order: [[col("date"), "ASC"]],
         raw: true,
       }),
+
+      // 10. 🔹 Top SP tuần này
+      OrderDetail.findAll({
+        attributes: [
+          "id_mon",
+          [fn("SUM", col("OrderDetail.so_luong")), "total_sold"],
+        ],
+        include: [
+          { model: Product, attributes: ["ten_mon", "anh"] },
+          {
+            model: Order,
+            attributes: [],
+            where: {
+              trang_thai: SUCCESS_ORDER_STATUSES,
+              ngay_dat: { [Op.between]: [currentWeek.start, currentWeek.end] },
+            },
+          },
+        ],
+        group: ["OrderDetail.id_mon", "Product.id_mon", "Product.ten_mon", "Product.anh"],
+        order: [[col("total_sold"), "DESC"]],
+        limit: 5,
+        subQuery: false,
+      }),
+
+      // 11. 🔹 Top SP tháng này
+      OrderDetail.findAll({
+        attributes: [
+          "id_mon",
+          [fn("SUM", col("OrderDetail.so_luong")), "total_sold"],
+        ],
+        include: [
+          { model: Product, attributes: ["ten_mon", "anh"] },
+          {
+            model: Order,
+            attributes: [],
+            where: {
+              trang_thai: SUCCESS_ORDER_STATUSES,
+              ngay_dat: { [Op.between]: [currentMonth.start, currentMonth.end] },
+            },
+          },
+        ],
+        group: ["OrderDetail.id_mon", "Product.id_mon", "Product.ten_mon", "Product.anh"],
+        order: [[col("total_sold"), "DESC"]],
+        limit: 5,
+        subQuery: false,
+      }),
+
+      // 12. 🔹 Top KH tuần này
+      Order.findAll({
+        attributes: [
+          "id_kh",
+          [fn("SUM", col("tong_tien")), "total_spent"],
+          [fn("COUNT", col("id_don")), "order_count"],
+        ],
+        where: {
+          trang_thai: SUCCESS_ORDER_STATUSES,
+          id_kh: { [Op.ne]: null },
+          ngay_dat: { [Op.between]: [currentWeek.start, currentWeek.end] },
+        },
+        include: [
+          {
+            model: Customer,
+            attributes: ["id_kh", "ho_ten", "email", "anh"],
+          },
+        ],
+        group: [
+          "Order.id_kh",
+          "Customer.id_kh",
+          "Customer.ho_ten",
+          "Customer.email",
+          "Customer.anh",
+        ],
+        order: [[col("total_spent"), "DESC"]],
+        limit: 5,
+        subQuery: false,
+      }),
+
+      // 13. 🔹 Top KH tháng này
+      Order.findAll({
+        attributes: [
+          "id_kh",
+          [fn("SUM", col("tong_tien")), "total_spent"],
+          [fn("COUNT", col("id_don")), "order_count"],
+        ],
+        where: {
+          trang_thai: SUCCESS_ORDER_STATUSES,
+          id_kh: { [Op.ne]: null },
+          ngay_dat: { [Op.between]: [currentMonth.start, currentMonth.end] },
+        },
+        include: [
+          {
+            model: Customer,
+            attributes: ["id_kh", "ho_ten", "email", "anh"],
+          },
+        ],
+        group: [
+          "Order.id_kh",
+          "Customer.id_kh",
+          "Customer.ho_ten",
+          "Customer.email",
+          "Customer.anh",
+        ],
+        order: [[col("total_spent"), "DESC"]],
+        limit: 5,
+        subQuery: false,
+      }),
     ]);
-    
-    // Gộp kết quả KPI
+
     const kpiCards = {
-      totalRevenue: kpiResult.totalRevenue || 0,
-      totalOrders: kpiResult.totalOrders || 0,
-      todayRevenue: kpiResult.todayRevenue || 0,
-      todayOrders: kpiResult.todayOrders || 0,
-      totalCustomers: customerStats.totalCustomers || 0,
-      todayCustomers: customerStats.todayCustomers || 0,
+      totalRevenue: Number(kpiResult?.totalRevenue || 0),
+      totalOrders: Number(kpiResult?.totalOrders || 0),
+      todayRevenue: Number(kpiResult?.todayRevenue || 0),
+      todayOrders: Number(kpiResult?.todayOrders || 0),
+      totalCustomers: Number(customerStats?.totalCustomers || 0),
+      todayCustomers: Number(customerStats?.todayCustomers || 0),
       pendingReservations: recentReservations.length,
     };
 
-    // Gộp kết quả và trả về
     res.json({
       success: true,
       data: {
         kpiCards,
         revenueOverTime,
         newCustomersOverTime,
-        topSellingProducts,
         orderStatusDistribution,
         recentOrders,
-        topCustomers,
         recentReservations,
+
+        // Top tổng
+        topSellingProducts,
+        topCustomers,
+
+        // 🔹 Top theo kỳ
+        topSellingProductsWeek,
+        topSellingProductsMonth,
+        topCustomersWeek,
+        topCustomersMonth,
       },
     });
   } catch (e) {

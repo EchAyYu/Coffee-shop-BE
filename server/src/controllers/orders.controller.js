@@ -1,6 +1,6 @@
 // src/controllers/orders.controller.js
 
-import { Op } from "sequelize";
+import { Op, fn, col } from "sequelize"; // 🔹 thêm fn, col
 import sequelize from "../utils/db.js";
 import db from "../models/index.js"; // dùng để lấy các model chính đã khai báo quan hệ
 import { sendOrderConfirmationEmail } from "../utils/mailer.js";
@@ -16,10 +16,17 @@ import {
   applyPromotionsToProduct,
 } from "../utils/promotionPricing.js";
 
+// 🔹 Dùng cho thống kê theo tuần/tháng/năm
+import {
+  getCurrentWeekRange,
+  getCurrentMonthRange,
+} from "../utils/dateRange.js";
+
 // Lấy các model còn lại từ db
 const { Order, OrderDetail, Product, Customer, Account, Notification } = db;
 
 // 💡 MAP DỊCH TRẠNG THÁI SANG TIẾNG VIỆT 💡
+// 👉 GIỮ NGUYÊN status trong DB (EN), chỉ dịch ra VI khi hiển thị
 const ORDER_STATUS_VI = {
   pending: "Đang xử lý",
   pending_payment: "Chờ thanh toán",
@@ -34,6 +41,16 @@ const ORDER_STATUS_VI = {
 const getStatusVi = (status) => {
   return ORDER_STATUS_VI[status?.toLowerCase()] || status;
 };
+
+// 🔹 Dùng cho thống kê (KHÔNG đổi trạng thái trong DB)
+const SUCCESS_ORDER_STATUSES = [
+  "completed",
+  "done",
+  "paid",
+  "shipped",
+  "confirmed",
+];
+const CANCELLED_ORDER_STATUSES = ["cancelled"];
 
 // ====== Helper: tạo thông báo ======
 async function pushNoti({ id_tk, type = "order", title, message }) {
@@ -413,6 +430,7 @@ export async function createOrder(req, res) {
       .json({ success: false, message: "Lỗi tạo đơn hàng." });
   }
 }
+
 /**
  * 🏷️ Lấy chi tiết đơn (Fix lỗi crash)
  */
@@ -619,3 +637,105 @@ export async function getOrdersAdmin(req, res) {
     });
   }
 }
+
+// =======================
+// 📤 EXPORT ĐƠN HÀNG RA CSV (THEO KỲ)
+// =======================
+export async function exportAdminOrdersCsv(req, res) {
+  try {
+    const period = (req.query.period || "month").toLowerCase();
+    let range;
+
+    if (period === "week") range = getCurrentWeekRange();
+    else if (period === "year") range = getCurrentYearRange();
+    else range = getCurrentMonthRange(); // mặc định: tháng
+
+    const { start, end } = range;
+
+    const orders = await Order.findAll({
+      where: {
+        ngay_dat: { [Op.between]: [start, end] },
+      },
+      include: [
+        {
+          model: Customer,
+          attributes: ["ho_ten", "email", "sdt"],
+        },
+        {
+          model: OrderDetail,
+          include: [{ model: Product, attributes: ["ten_mon"] }],
+        },
+      ],
+      order: [["ngay_dat", "ASC"]],
+    });
+
+    // Header CSV
+    const header = [
+      "ID đơn",
+      "Ngày đặt",
+      "Khách hàng",
+      "Email",
+      "SĐT",
+      "Tổng tiền",
+      "Trạng thái",
+      "Chi tiết sản phẩm",
+    ];
+
+    const rows = orders.map((o) => {
+      const products = (o.OrderDetails || [])
+        .map(
+          (d) =>
+            `${d.Product?.ten_mon || "Không rõ"} x${d.so_luong} (${d.gia}đ)`
+        )
+        .join(" | ");
+
+      return [
+        o.id_don,
+        o.ngay_dat
+          ? new Date(o.ngay_dat).toLocaleString("vi-VN")
+          : "",
+        o.Customer?.ho_ten || o.ho_ten_nhan || "Khách vãng lai",
+        o.Customer?.email || o.email_nhan || "",
+        o.Customer?.sdt || o.sdt_nhan || "",
+        o.tong_tien,
+        o.trang_thai,
+        products,
+      ];
+    });
+
+    const csvLines = [
+      header.join(","), // dòng header
+      ...rows.map((r) =>
+        r
+          .map((cell) =>
+            typeof cell === "string"
+              ? `"${cell.replace(/"/g, '""')}"`
+              : cell
+          )
+          .join(",")
+      ),
+    ];
+
+    const csvContent = csvLines.join("\n");
+
+    res.setHeader(
+      "Content-Type",
+      "text/csv; charset=utf-8"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="orders_${period}.csv"`
+    );
+
+    res.send("\ufeff" + csvContent); // BOM UTF-8 cho Excel
+  } catch (err) {
+    console.error("exportAdminOrdersCsv error:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi xuất CSV đơn hàng." });
+  }
+}
+
+
+
+
