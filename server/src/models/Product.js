@@ -1,6 +1,9 @@
 import { DataTypes } from "sequelize";
 import sequelize from "../utils/db.js";
-
+import {
+  getActivePromotionsNow,
+  applyPromotionsToProduct,
+} from "../utils/promotionPricing.js";
 const Product = sequelize.define("Product", {
   id_mon: {
     type: DataTypes.INTEGER,
