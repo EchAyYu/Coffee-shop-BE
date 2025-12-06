@@ -110,7 +110,7 @@ export async function createAdminPromotion(req, res) {
       gio_bd,
       gio_kt,
       hien_thi,
-      ap_dung_gia,   // ✅ MỚI
+      ap_dung_gia,   // ✅
       button_text,
       button_link,
     } = req.body;
@@ -121,6 +121,16 @@ export async function createAdminPromotion(req, res) {
         message: "Thiếu tên khuyến mãi hoặc ngày bắt đầu/kết thúc.",
       });
     }
+
+    // ✅ Chuẩn hóa lap_lai_thu:
+    // - "", null, undefined => null (áp dụng tất cả các ngày)
+    // - 1–7 => Number(...)
+    const normalizedLapLaiThu =
+      lap_lai_thu === "" ||
+      lap_lai_thu === null ||
+      lap_lai_thu === undefined
+        ? null
+        : Number(lap_lai_thu);
 
     const promo = await Promotion.create(
       {
@@ -142,13 +152,13 @@ export async function createAdminPromotion(req, res) {
 
         ngay_bd,
         ngay_kt,
-        lap_lai_thu: lap_lai_thu ?? null,
+        lap_lai_thu: normalizedLapLaiThu,
         gio_bd: gio_bd || null,
         gio_kt: gio_kt || null,
 
         hien_thi: hien_thi !== undefined ? !!hien_thi : true,
 
-        // ✅ MỚI: default true nếu không gửi lên
+        // ✅ default true nếu không gửi lên
         ap_dung_gia:
           ap_dung_gia !== undefined ? !!ap_dung_gia : true,
 
@@ -232,7 +242,7 @@ export async function updateAdminPromotion(req, res) {
       gio_bd,
       gio_kt,
       hien_thi,
-      ap_dung_gia,   // ✅ MỚI
+      ap_dung_gia,   // ✅
       button_text,
       button_link,
     } = req.body;
@@ -244,6 +254,14 @@ export async function updateAdminPromotion(req, res) {
         .status(404)
         .json({ success: false, message: "Không tìm thấy khuyến mãi." });
     }
+
+    // ✅ Chuẩn hóa lap_lai_thu giống create
+    const normalizedLapLaiThu =
+      lap_lai_thu === "" ||
+      lap_lai_thu === null ||
+      lap_lai_thu === undefined
+        ? null
+        : Number(lap_lai_thu);
 
     await promo.update(
       {
@@ -265,13 +283,12 @@ export async function updateAdminPromotion(req, res) {
 
         ngay_bd,
         ngay_kt,
-        lap_lai_thu: lap_lai_thu ?? null,
+        lap_lai_thu: normalizedLapLaiThu,
         gio_bd: gio_bd || null,
         gio_kt: gio_kt || null,
 
         hien_thi: hien_thi !== undefined ? !!hien_thi : promo.hien_thi,
 
-        // ✅ MỚI
         ap_dung_gia:
           ap_dung_gia !== undefined ? !!ap_dung_gia : promo.ap_dung_gia,
 
@@ -347,6 +364,7 @@ export async function updateAdminPromotion(req, res) {
     });
   }
 }
+
 
 /**
  * [ADMIN] Xóa khuyến mãi

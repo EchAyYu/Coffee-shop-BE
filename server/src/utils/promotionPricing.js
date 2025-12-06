@@ -24,7 +24,7 @@ function isWithinTimeRange(now, promo) {
 export async function getActivePromotionsNow() {
   const now = new Date();
 
-  // JS: 0=CN,1=Mon... -> convert về 1–7 (2=Thứ 2,...,7=CN)
+  // JS: 0=CN,1=Mon... -> convert về 1–7 (1=Thứ 2,...,7=CN)
   const weekdayJs = now.getDay();
   const weekdayVN = weekdayJs === 0 ? 7 : weekdayJs; // 1-7
 
@@ -36,8 +36,14 @@ export async function getActivePromotionsNow() {
 
       ngay_bd: { [Op.lte]: now },
       ngay_kt: { [Op.gte]: now },
+
+      // ✅ FIX QUAN TRỌNG:
+      //  - null : áp dụng tất cả các ngày (dữ liệu chuẩn)
+      //  - ""   : dữ liệu cũ FE gửi chuỗi rỗng (coi như tất cả các ngày)
+      //  - weekdayVN: áp dụng đúng thứ trong tuần
       [Op.or]: [
-        { lap_lai_thu: null }, // Áp dụng tất cả các ngày
+        { lap_lai_thu: null },
+        { lap_lai_thu: "" },
         { lap_lai_thu: weekdayVN },
       ],
     },
