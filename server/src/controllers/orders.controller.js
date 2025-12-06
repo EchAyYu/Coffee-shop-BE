@@ -626,22 +626,83 @@ export async function deleteOrder(req, res) {
  */
 export async function getOrdersAdmin(req, res) {
   try {
-    const orders = await Order.findAll({
+    // 1. Phân trang
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const offset = (page - 1) * limit;
+
+    // 2. Tab: "active" (đơn cần xử lý) | "completed" (đã hoàn thành/hủy)
+    const tab = (req.query.tab || "active").toLowerCase();
+
+    // 3. Lọc theo ngày (chủ yếu dùng cho tab completed – đơn trong ngày)
+    const date = req.query.date; // 'YYYY-MM-DD' hoặc undefined
+
+    // 4. Xây dựng điều kiện where
+    const where = {};
+
+    // Các trạng thái “chưa xong” – cần admin/nhân viên xử lý
+    const ACTIVE_STATUSES = [
+      "pending",          // Chờ xác nhận
+      "pending_payment",  // Chờ thanh toán
+      "confirmed",        // Đã xác nhận
+      "PREORDER",         // Đặt trước
+      "shipped",          // Đang giao (hoặc đã chuyển giao)
+    ];
+
+    // Các trạng thái đã kết thúc (hoàn thành / hủy / đã thanh toán xong)
+    const COMPLETED_STATUSES = [
+      "completed",  // Đã hoàn thành
+      "done",       // Đã hoàn thành (trạng thái cũ)
+      "paid",       // Đã thanh toán
+      "cancelled",  // Đã hủy
+    ];
+
+
+    if (tab === "completed") {
+      where.trang_thai = { [Op.in]: COMPLETED_STATUSES };
+    } else {
+      // mặc định: active
+      where.trang_thai = { [Op.in]: ACTIVE_STATUSES };
+    }
+
+    if (date) {
+      const start = new Date(date + "T00:00:00.000");
+      const end = new Date(date + "T23:59:59.999");
+      where.ngay_dat = { [Op.between]: [start, end] };
+    }
+
+    // 5. Query có phân trang
+    const { rows, count } = await Order.findAndCountAll({
+      where,
       include: [
-        { model: Customer, attributes: ["id_kh", "ho_ten", "email"] },
+        { model: Customer, attributes: ["id_kh", "ho_ten", "email", "sdt"] },
         {
           model: OrderDetail,
-          include: [{ model: Product, attributes: ["id_mon", "ten_mon", "anh"] }],
+          include: [
+            { model: Product, attributes: ["id_mon", "ten_mon", "anh"] },
+          ],
         },
       ],
       order: [["ngay_dat", "DESC"]],
+      limit,
+      offset,
     });
-    res.json({ success: true, data: orders });
+
+    return res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.max(Math.ceil(count / limit), 1),
+      },
+    });
   } catch (err) {
     console.error("getOrdersAdmin error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Lỗi máy chủ khi lấy danh sách đơn hàng.",
+      message: "Lỗi khi tải danh sách đơn hàng.",
     });
   }
 }
