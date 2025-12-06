@@ -281,18 +281,23 @@ export async function myVouchers(req, res) {
       .json({ success: false, message: "Lỗi lấy voucher của tôi." });
   }
 }
-
 // 2.4) Validate mã khi checkout (tính số tiền giảm)
 export async function validateCode(req, res) {
   try {
     const id_tk = req.user?.id_tk || req.user?.id;
     const { code, order_total, items } = req.body;
 
-    // 🛑 NEW RULE: Không cho dùng voucher nếu đơn hàng có sản phẩm đang khuyến mãi
-    if (Array.isArray(items)) {
-      const hasDiscountedProduct = items.some(
-        (it) => it.gia_km != null && Number(it.gia_km) < Number(it.gia_goc)
-      );
+    // 🛑 RULE 1: Không cho dùng voucher nếu đơn hàng có sản phẩm đang khuyến mãi
+    // FE nên gửi mỗi item kiểu:
+    // { id_mon, so_luong, gia_goc, gia_km } hoặc có cờ isDiscounted
+    if (Array.isArray(items) && items.length > 0) {
+      const hasDiscountedProduct = items.some((it) => {
+        const giaGoc = Number(it.gia_goc ?? it.gia ?? 0);
+        const giaKm = Number(
+          it.gia_km ?? it.gia_sau_km ?? it.gia ?? giaGoc
+        );
+        return giaKm > 0 && giaKm < giaGoc; // có giảm so với gốc
+      });
 
       if (hasDiscountedProduct) {
         return res.status(400).json({
@@ -320,10 +325,15 @@ export async function validateCode(req, res) {
       });
     }
 
-    if (redemption.expires_at && new Date(redemption.expires_at) <= new Date()) {
+    if (
+      redemption.expires_at &&
+      new Date(redemption.expires_at) <= new Date()
+    ) {
       redemption.status = "expired";
       await redemption.save();
-      return res.status(400).json({ success: false, message: "Mã đã hết hạn" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Mã đã hết hạn" });
     }
 
     const voucher = await Voucher.findByPk(redemption.voucher_id);
@@ -333,7 +343,7 @@ export async function validateCode(req, res) {
         .json({ success: false, message: "Voucher không hợp lệ" });
     }
 
-    // ----- Tính giảm giá -----
+    // ----- Tính giảm giá trên tổng tiền đơn hàng -----
     const subtotal = Number(order_total || 0);
 
     if (subtotal < Number(voucher.min_order || 0)) {
@@ -356,12 +366,19 @@ export async function validateCode(req, res) {
 
     discount = Math.min(discount, cap, subtotal);
 
-    res.json({ success: true, data: { code, discount } });
+    // ✅ Ở đây chỉ validate 1 mã / 1 lần, không cho mảng nhiều code
+    return res.json({
+      success: true,
+      data: { code, discount },
+    });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ success: false, message: "Lỗi kiểm tra voucher." });
+    console.error("validateCode error:", e);
+    return res
+      .status(500)
+      .json({ success: false, message: "Lỗi kiểm tra voucher." });
   }
 }
+
 // 3) Cấp voucher chào mừng cho user mới
 
 export async function grantWelcomeVoucherForNewUser(id_tk) {

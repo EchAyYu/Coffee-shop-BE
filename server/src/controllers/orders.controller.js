@@ -183,8 +183,14 @@ export async function createOrder(req, res) {
     pttt,
     ghi_chu,
     items,
-    voucher_code,
+    voucher_code, // ✅ chỉ 1 voucher cho 1 đơn
   } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Giỏ hàng trống." });
+  }
 
   const user = req.user;
   let customer = null;
@@ -207,8 +213,8 @@ export async function createOrder(req, res) {
         });
         id_kh = newCustomer.id_kh;
       }
-    } catch (findOrCreatErr) {
-      console.error(`Lỗi tìm/tạo Customer:`, findOrCreatErr);
+    } catch (err) {
+      console.error("Lỗi tìm/tạo Customer:", err);
       return res
         .status(500)
         .json({ success: false, message: "Lỗi hệ thống khách hàng." });
@@ -265,10 +271,11 @@ export async function createOrder(req, res) {
 
       calculatedTotal += itemPrice * item.so_luong;
 
+      // Lưu chi tiết đã áp KM
       productDetails.push({
         id_mon: item.id_mon,
         so_luong: item.so_luong,
-        gia: itemPrice, // lưu giá đã áp KM vào chi tiết đơn
+        gia: itemPrice, // lưu giá sau khuyến mãi vào chi tiết đơn
         Product: { ten_mon: productInfo.ten_mon },
       });
     }
@@ -279,13 +286,13 @@ export async function createOrder(req, res) {
       .json({ success: false, message: "Lỗi kiểm tra sản phẩm." });
   }
 
-  // ===== Xử lý voucher =====
+  // ===== Xử lý voucher (CHỈ 1 MÃ) =====
   let discount = 0;
   let redemptionToUse = null;
 
   try {
     if (voucher_code) {
-      // ⛔ Không cho dùng voucher nếu giỏ có sản phẩm đang khuyến mãi
+      // ⛔ RULE 2: Không cho dùng voucher nếu giỏ có sản phẩm đang khuyến mãi
       if (hasDiscountedItem) {
         return res.status(400).json({
           success: false,
@@ -295,9 +302,10 @@ export async function createOrder(req, res) {
       }
 
       if (!user?.id_tk) {
-        return res
-          .status(401)
-          .json({ success: false, message: "Cần đăng nhập để dùng voucher." });
+        return res.status(401).json({
+          success: false,
+          message: "Cần đăng nhập để dùng voucher.",
+        });
       }
 
       // 1) Tìm mã cá nhân
@@ -347,7 +355,7 @@ export async function createOrder(req, res) {
         });
       }
 
-      // 4) Tính số tiền giảm
+      // 4) Tính số tiền giảm (chỉ 1 voucher)
       if (voucher.discount_type === "fixed") {
         discount = Number(voucher.discount_value);
       } else {
@@ -387,7 +395,7 @@ export async function createOrder(req, res) {
     }));
     await OrderDetail.bulkCreate(orderDetailData);
 
-    // Đánh dấu voucher đã dùng
+    // Đánh dấu voucher đã dùng (CHỈ 1 MÃ)
     if (redemptionToUse) {
       await redemptionToUse.update({
         status: "used",
@@ -407,7 +415,7 @@ export async function createOrder(req, res) {
       });
     }
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Tạo đơn hàng thành công!",
       data: {
@@ -425,7 +433,7 @@ export async function createOrder(req, res) {
         await Order.destroy({ where: { id_don: newOrder.id_don } });
       } catch (_) {}
     }
-    res
+    return res
       .status(500)
       .json({ success: false, message: "Lỗi tạo đơn hàng." });
   }
@@ -755,7 +763,7 @@ export async function getAdminOrderStats(req, res) {
 
     const { start, end } = range;
 
-    // Điều kiện chung theo ngày đặt
+    // Điều kiện theo ngày đặt
     const baseWhere = {
       ngay_dat: { [Op.between]: [start, end] },
     };
@@ -781,7 +789,7 @@ export async function getAdminOrderStats(req, res) {
       },
     });
 
-    // Doanh thu trong kỳ (chỉ tính đơn hoàn thành / thành công)
+    // Doanh thu trong kỳ (chỉ tính đơn thành công)
     const revenue = await Order.sum("tong_tien", {
       where: {
         ...baseWhere,
@@ -789,11 +797,12 @@ export async function getAdminOrderStats(req, res) {
       },
     });
 
-    // Tính phần trăm
+    // Tính %
     const completedPercent =
       totalOrders > 0
         ? Math.round((completedOrders * 100) / totalOrders)
         : 0;
+
     const cancelledPercent =
       totalOrders > 0
         ? Math.round((cancelledOrders * 100) / totalOrders)
