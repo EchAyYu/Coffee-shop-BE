@@ -86,6 +86,7 @@ router.put(
       "done",
       "paid",
       "shipped",
+       "PREORDER",
     ]),
   ],
   validate,
