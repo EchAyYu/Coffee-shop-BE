@@ -38,7 +38,6 @@ import employeesRouter from "./routes/employees.js";
 import reviewsRouter from "./routes/reviews.js";
 import adminRouter from "./routes/admin.js";
 import statsRouter from "./routes/stats.js";
-import adminOrdersRoute from "./routes/adminOrders.route.js";
 import tablesRouter from "./routes/tables.js";
 import homeContentRoutes from "./routes/homeContentRoutes.js";
 import customerProfileRoutes from "./routes/customerProfileRoutes.js";
@@ -115,12 +114,7 @@ app.use("/api/customers", customersRouter);
 app.use("/api/employees", employeesRouter);
 
 // Admin Orders (cho admin + employee)
-app.use(
-  "/api/admin/orders",
-  requireAuth,
-  authorizeRoles("admin", "employee"),
-  adminOrdersRoute
-);
+app.use("/api/admin/orders", requireAuth, authorizeRoles("admin", "employee"), ordersRouter);
 
 // Admin Reviews
 app.use(

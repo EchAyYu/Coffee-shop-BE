@@ -737,27 +737,92 @@ export async function exportAdminOrdersCsv(req, res) {
 }
 
 /**
- * 📊 Thống kê đơn hàng (Admin)
+ * 📊 Thống kê đơn hàng (Admin) theo tuần / tháng
+ * GET /api/admin/orders-stats?period=week|month
  */
 export async function getAdminOrderStats(req, res) {
-  // Ví dụ: lấy thống kê đơn hàng (tổng số, tổng doanh thu, v.v...)
   try {
-    const totalOrders = await Order.count();
-    const totalRevenue = await Order.sum("tong_tien");
-    
-    res.json({ 
-      success: true, 
-      stats: {
+    const period = (req.query.period || "month").toLowerCase();
+
+    // Xác định khoảng thời gian
+    let range;
+    if (period === "week") {
+      range = getCurrentWeekRange();
+    } else {
+      // mặc định: tháng
+      range = getCurrentMonthRange();
+    }
+
+    const { start, end } = range;
+
+    // Điều kiện chung theo ngày đặt
+    const baseWhere = {
+      ngay_dat: { [Op.between]: [start, end] },
+    };
+
+    // Tổng số đơn trong kỳ
+    const totalOrders = await Order.count({
+      where: baseWhere,
+    });
+
+    // Số đơn hoàn thành trong kỳ
+    const completedOrders = await Order.count({
+      where: {
+        ...baseWhere,
+        trang_thai: { [Op.in]: SUCCESS_ORDER_STATUSES },
+      },
+    });
+
+    // Số đơn đã hủy trong kỳ
+    const cancelledOrders = await Order.count({
+      where: {
+        ...baseWhere,
+        trang_thai: { [Op.in]: CANCELLED_ORDER_STATUSES },
+      },
+    });
+
+    // Doanh thu trong kỳ (chỉ tính đơn hoàn thành / thành công)
+    const revenue = await Order.sum("tong_tien", {
+      where: {
+        ...baseWhere,
+        trang_thai: { [Op.in]: SUCCESS_ORDER_STATUSES },
+      },
+    });
+
+    // Tính phần trăm
+    const completedPercent =
+      totalOrders > 0
+        ? Math.round((completedOrders * 100) / totalOrders)
+        : 0;
+    const cancelledPercent =
+      totalOrders > 0
+        ? Math.round((cancelledOrders * 100) / totalOrders)
+        : 0;
+
+    return res.json({
+      success: true,
+      data: {
+        period,
+        range: {
+          start,
+          end,
+        },
         totalOrders,
-        totalRevenue,
-      }
+        completedOrders,
+        cancelledOrders,
+        completedPercent,
+        cancelledPercent,
+        periodRevenue: Number(revenue) || 0,
+      },
     });
   } catch (err) {
     console.error("getAdminOrderStats error:", err);
-    res.status(500).json({ success: false, message: "Lỗi máy chủ khi lấy thống kê đơn hàng." });
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi lấy thống kê đơn hàng.",
+    });
   }
 }
-
 
 
 

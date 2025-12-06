@@ -1,6 +1,11 @@
+// src/routes/orders.js
 import express from "express";
-import { body, param, query } from "express-validator";
-import { requireAuth, authorizeRoles, loadUserIfAuthenticated } from "../middlewares/authMiddleware.js";
+import { body, param } from "express-validator";
+import {
+  requireAuth,
+  authorizeRoles,
+  loadUserIfAuthenticated,
+} from "../middlewares/authMiddleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { validate } from "../utils/validate.js";
 import {
@@ -10,11 +15,17 @@ import {
   updateOrderStatus,
   deleteOrder,
   getMyOrders,
+  exportAdminOrdersCsv, // Export CSV
+  getAdminOrderStats,   // Thống kê (nếu dùng /stats)
 } from "../controllers/orders.controller.js";
 
 const router = express.Router();
 
-// --- CLIENT ROUTES ---
+/* ============================
+ * 👤 CLIENT ROUTES
+ * ============================ */
+
+// Tạo đơn hàng (khách, có thể chưa login, nhưng có load user nếu có token)
 router.post(
   "/",
   asyncHandler(loadUserIfAuthenticated),
@@ -29,6 +40,7 @@ router.post(
   asyncHandler(createOrder)
 );
 
+// Lịch sử đơn hàng của tôi
 router.get(
   "/my",
   requireAuth,
@@ -36,52 +48,82 @@ router.get(
   asyncHandler(getMyOrders)
 );
 
+// Xem chi tiết đơn (customer chỉ xem được đơn của mình, admin/employee xem tất cả)
 router.get(
-  "/:id(\\d+)", 
-  requireAuth, 
-  // Cho phép customer xem đơn của mình, admin/employee xem mọi đơn
-  // Logic này thường nằm trong controller getOrderById
+  "/:id(\\d+)",
+  requireAuth,
   asyncHandler(getOrderById)
 );
 
-// --- ADMIN & EMPLOYEE ROUTES ---
+/* ============================
+ * 🛠 ADMIN & EMPLOYEE ROUTES
+ * Các route này sẽ được bảo vệ bằng:
+ *  - requireAuth + authorizeRoles ngay tại đây
+ *  - Và/hoặc khi mount ở /api/admin/orders
+ * ============================ */
 
-// 1. Lấy danh sách đơn hàng
+// 1. Lấy danh sách đơn hàng (Admin & Employee)
 router.get(
-  "/list", // Hoặc "/" tùy vào cách bạn mount route trong server.js (thường là /api/admin/orders hoặc /api/orders/list)
+  "/list",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   asyncHandler(getOrdersAdmin)
 );
 
 // 2. Cập nhật trạng thái đơn hàng
 router.put(
-  "/:id(\\d+)/status", 
+  "/:id(\\d+)/status",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   [
     param("id").isInt({ min: 1 }).toInt(),
-    body("trang_thai").isIn(["pending", "pending_payment", "confirmed", "completed", "cancelled", "done", "paid", "shipped"]),
+    body("trang_thai").isIn([
+      "pending",
+      "pending_payment",
+      "confirmed",
+      "completed",
+      "cancelled",
+      "done",
+      "paid",
+      "shipped",
+    ]),
   ],
   validate,
-  asyncHandler(updateOrderStatus) 
+  asyncHandler(updateOrderStatus)
 );
 
 // 3. Xóa đơn hàng
 router.delete(
   "/:id(\\d+)",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
   [param("id").isInt({ min: 1 }).toInt()],
   validate,
   asyncHandler(deleteOrder)
 );
 
-// Route đặc biệt cho admin lấy danh sách (nếu bạn dùng route riêng này)
+// 4. Export đơn hàng ra CSV (tuần / tháng)
+// FE gọi: GET /api/admin/orders/export?period=week|month
 router.get(
-  "/", // Nếu adminApi gọi /api/admin/orders trỏ vào đây
+  "/export",
   requireAuth,
-  authorizeRoles("admin", "employee"), // 💡 THÊM "employee"
+  authorizeRoles("admin", "employee"),
+  asyncHandler(exportAdminOrdersCsv)
+);
+
+// 5. (tuỳ chọn) Thống kê theo route /api/admin/orders/stats
+router.get(
+  "/stats",
+  requireAuth,
+  authorizeRoles("admin", "employee"),
+  asyncHandler(getAdminOrderStats)
+);
+
+// 6. Route đặc biệt cho admin lấy danh sách (nếu FE gọi /api/admin/orders)
+router.get(
+  "/",
+  requireAuth,
+  authorizeRoles("admin", "employee"),
   asyncHandler(getOrdersAdmin)
 );
 
