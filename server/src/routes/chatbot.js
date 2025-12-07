@@ -4,6 +4,7 @@ import {
   handleChatbotMessage,
   handleChatbotImageMessage,
 } from "../controllers/chatbot.controller.js";
+import { loadUserIfAuthenticated } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
@@ -13,10 +14,15 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-// Chat text như cũ
-router.post("/", handleChatbotMessage);
+// Chat text (có thể có user nếu đã đăng nhập)
+router.post("/", loadUserIfAuthenticated, handleChatbotMessage);
 
-// 🔥 Chat kèm hình ảnh
-router.post("/image", upload.single("image"), handleChatbotImageMessage);
+// Chat kèm hình ảnh (cũng nhận user nếu có)
+router.post(
+  "/image",
+  loadUserIfAuthenticated,
+  upload.single("image"),
+  handleChatbotImageMessage
+);
 
 export default router;

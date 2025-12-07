@@ -66,7 +66,54 @@ function normalizeText(str = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
+/**
+ * Map ORDER_JSON (từ AI) -> danh sách orderItems dùng được trên FE
+ */
+function mapOrderJsonToItems(jsonStr, products) {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
+    if (!rawItems.length || !Array.isArray(products) || !products.length) {
+      return null;
+    }
 
+    const mapped = [];
+
+    for (const it of rawItems) {
+      const rawName = String(it.name || it.product_name || "").trim();
+      if (!rawName) continue;
+      const qty = Number(it.quantity) || 1;
+      const target = rawName.toLowerCase();
+
+      // Tìm sản phẩm trong DB theo tên gần giống
+      let product =
+        products.find(
+          (p) => (p.ten_mon || "").toLowerCase() === target
+        ) ||
+        products.find((p) =>
+          (p.ten_mon || "").toLowerCase().includes(target)
+        ) ||
+        products.find((p) =>
+          target.includes((p.ten_mon || "").toLowerCase())
+        );
+
+      if (product) {
+        mapped.push({
+          id_mon: product.id_mon,
+          ten_mon: product.ten_mon,
+          gia: product.gia,
+          anh: product.anh || product.hinh_anh || null,
+          quantity: qty,
+        });
+      }
+    }
+
+    return mapped.length ? mapped : null;
+  } catch (e) {
+    console.warn("Không parse được ORDER_JSON:", e);
+    return null;
+  }
+}
 // Gom menu (theo danh mục) để AI thấy được danh sách món
 function buildMenuText(products = []) {
   if (!products.length) return "Menu trống hoặc không lấy được dữ liệu.";
@@ -194,6 +241,25 @@ function buildRecommendationText(products = []) {
     text += pickNames(dairyFree) + "\n";
   }
 
+  // 5) Một vài combo gợi ý đơn giản (có thể tuỳ chỉnh theo menu thật)
+  const combos = [
+    {
+      name: "Combo sáng tỉnh táo",
+      items: ["Cà phê sữa đá", "Bánh flan"],
+    },
+    {
+      name: "Combo trà trái cây thư giãn",
+      items: ["Trà đào cam sả", "Bánh bông lan trứng muối"],
+    },
+  ];
+
+  if (combos.length) {
+    text += "\n5) Một vài combo gợi ý:\n";
+    for (const c of combos) {
+      text += `• ${c.name}: ${c.items.join(" + ")}\n`;
+    }
+  }
+
   return text;
 }
 
@@ -274,6 +340,18 @@ ${recommendationText}
        • Nói rõ: quán hiện KHÔNG có món y hệt trong hình.
        • Gợi ý 2–4 món trong menu có phong cách/hương vị TƯƠNG TỰ nhất.
 - KHÔNG được bịa tên món mới ngoài danh sách menu.
+- Nếu khách nói rõ muốn ĐẶT MÓN dựa trên hình (ví dụ: "cho mình 2 ly giống trong hình",
+  "đặt giúp mình ly này", "order 1 ly như hình"):
+  • Hãy chọn MỘT món trong menu là tương đương nhất với đồ uống trong hình.
+  • Ở CUỐI câu trả lời, sinh thêm khối JSON:
+    <ORDER_JSON>
+    {
+      "items": [
+        { "name": "[Tên món trong menu]", "quantity": SỐ_LƯỢNG }
+      ]
+    }
+    </ORDER_JSON>
+  • Chỉ sinh ORDER_JSON khi khách CHỐT muốn đặt, không chỉ hỏi tham khảo.
 
 8. Quy tắc chung:
 - Chỉ sử dụng các món có trong dữ liệu (menuText, recommendationText). Không bịa món không tồn tại.
@@ -425,69 +503,27 @@ export const handleChatbotMessage = async (req, res) => {
       reply = reply.replace(match[0], "").trim();
     }
 
+    
     // 2.6. Tìm ORDER_JSON (đặt món nhanh) nếu có
     let orderItems = null;
     const orderMatch = reply.match(/<ORDER_JSON>([\s\S]+?)<\/ORDER_JSON>/);
 
     if (orderMatch) {
-      try {
-        const jsonStr = orderMatch[1].trim();
-        const parsed = JSON.parse(jsonStr);
-        const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
-
-        if (rawItems.length && Array.isArray(products) && products.length) {
-          const mapped = [];
-
-          for (const it of rawItems) {
-            const rawName = String(it.name || it.product_name || "").trim();
-            if (!rawName) continue;
-            const qty = Number(it.quantity) || 1;
-
-            const target = rawName.toLowerCase();
-
-            // Tìm sản phẩm trong DB theo tên gần giống
-            let product =
-              products.find(
-                (p) => (p.ten_mon || "").toLowerCase() === target
-              ) ||
-              products.find((p) =>
-                (p.ten_mon || "").toLowerCase().includes(target)
-              ) ||
-              products.find((p) =>
-                target.includes((p.ten_mon || "").toLowerCase())
-              );
-
-            if (product) {
-              mapped.push({
-                id_mon: product.id_mon,
-                ten_mon: product.ten_mon,
-                gia: product.gia,
-                anh: product.anh || product.hinh_anh || null,
-                quantity: qty,
-              });
-            }
-          }
-
-          if (mapped.length) {
-            orderItems = mapped;
-          }
-        }
-      } catch (e) {
-        console.warn("Không parse được ORDER_JSON:", e);
-      }
-
+      const jsonStr = orderMatch[1].trim();
+      orderItems = mapOrderJsonToItems(jsonStr, products);
       // Xoá khối ORDER_JSON khỏi câu trả lời
       reply = reply.replace(orderMatch[0], "").trim();
     }
 
+
     return res.json({ reply, reservationData, orderItems });
-  } catch (error) {
-    console.error("Chatbot error:", error);
-    return res.status(500).json({
-      message: "Chatbot đang gặp lỗi, vui lòng thử lại.",
-    });
-  }
-};
+    } catch (error) {
+      console.error("Chatbot error:", error);
+      return res.status(500).json({
+        message: "Chatbot đang gặp lỗi, vui lòng thử lại.",
+      });
+      }
+    };
 
 // ==============================
 // 3. Chat bằng HÌNH ẢNH
@@ -571,11 +607,21 @@ export const handleChatbotImageMessage = async (req, res) => {
       max_tokens: 512,
     });
 
-    const reply =
+    let reply =
       completion.choices?.[0]?.message?.content ||
       "Mình chưa đọc được hình này, bạn thử gửi lại giúp mình nhé.";
 
-    return res.json({ reply });
+    // Thử parse ORDER_JSON trong câu trả lời (nếu model sinh ra)
+    let orderItems = null;
+    const orderMatch = reply.match(/<ORDER_JSON>([\s\S]+?)<\/ORDER_JSON>/);
+
+    if (orderMatch) {
+      const jsonStr = orderMatch[1].trim();
+      orderItems = mapOrderJsonToItems(jsonStr, products);
+      reply = reply.replace(orderMatch[0], "").trim();
+    }
+
+    return res.json({ reply, orderItems });
   } catch (error) {
     console.error("Chatbot image error:", error);
     return res.status(500).json({

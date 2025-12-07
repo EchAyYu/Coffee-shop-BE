@@ -1,4 +1,4 @@
-// src/middlewares/authMiddleware.js (ĐÃ CẬP NHẬT)
+// src/middlewares/authMiddleware.js
 
 import jwt from "jsonwebtoken";
 import Account from "../models/Account.js";
@@ -6,7 +6,7 @@ import Account from "../models/Account.js";
 const ACCESS_SECRET = process.env.JWT_SECRET || "secretkey";
 
 /**
- * 🔹 Lấy token từ header Authorization hoặc cookie
+ * Lấy access token từ header Authorization hoặc cookie
  */
 function getAccessToken(req) {
   const header = req.headers.authorization || "";
@@ -16,106 +16,136 @@ function getAccessToken(req) {
 }
 
 /**
- * 🔹 Chuẩn hóa role
+ * Chuẩn hoá role từ DB
  */
-function normalizeRole(role, fallback = "user") {
-  if (!role) return fallback;
-  return String(role).toLowerCase();
+function normalizeRole(role) {
+  if (!role) return "customer";
+  const r = String(role).toLowerCase();
+  if (r === "admin") return "admin";
+  if (r === "employee" || r === "staff") return "employee";
+  return "customer";
 }
 
 /**
- * 🧠 Middleware xác thực người dùng (ASYNC)
+ * Gắn req.user từ token (dùng bên trong các middleware khác)
+ */
+async function attachUserFromToken(req) {
+  const token = getAccessToken(req);
+  if (!token) {
+    throw new Error("NO_TOKEN");
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, ACCESS_SECRET);
+  } catch (err) {
+    throw new Error("INVALID_TOKEN");
+  }
+
+  // decoded có dạng: { id_tk, ten_dn, role, email, iat, exp }
+  const id = decoded.id_tk || decoded.id;
+  if (!id) {
+    throw new Error("INVALID_PAYLOAD");
+  }
+
+  // Lấy lại account từ DB để chắc chắn role hiện tại
+  const account = await Account.findByPk(id, {
+    attributes: ["id_tk", "ten_dn", "role"],
+  });
+
+  if (!account) {
+    throw new Error("ACCOUNT_NOT_FOUND");
+  }
+
+  req.user = {
+    id_tk: account.id_tk,
+    ten_dn: account.ten_dn,
+    role: normalizeRole(account.role),
+  };
+}
+
+/**
+ * BẮT BUỘC đăng nhập
  */
 export async function requireAuth(req, res, next) {
   try {
-    const token = getAccessToken(req);
-    if (!token) {
-      return res.status(401).json({ success: false, message: "Chưa đăng nhập" });
-    }
-
-    const decoded = jwt.verify(token, ACCESS_SECRET);
-    const id_tk = decoded.id_tk || decoded.id;
-
-    const account = await Account.findByPk(id_tk);
-    if (!account) {
-      return res.status(401).json({ success: false, message: "Tài khoản không tồn tại" });
-    }
-
-    req.user = {
-      id_tk: account.id_tk,
-      ten_dn: account.ten_dn,
-      role: normalizeRole(account.role),
-    };
-
-    next();
+    await attachUserFromToken(req);
+    return next();
   } catch (err) {
-    console.error("[requireAuth]", err);
-    return res.status(401).json({ success: false, message: "Token không hợp lệ hoặc hết hạn" });
+    if (err.message === "NO_TOKEN") {
+      return res
+        .status(401)
+        .json({ success: false, message: "Bạn cần đăng nhập để tiếp tục" });
+    }
+    console.warn("[requireAuth] error:", err.message);
+    return res
+      .status(401)
+      .json({ success: false, message: "Token không hợp lệ hoặc đã hết hạn" });
   }
 }
 
-export const authMiddleware = requireAuth;
-
 /**
- * 🧩 Cho phép các vai trò cụ thể
+ * Chỉ cho phép các role nhất định
  */
-export function authorizeRoles(...roles) {
-  const allowed = roles.map((r) => normalizeRole(r));
+export function authorizeRoles(...allowedRoles) {
+  const allowed = allowedRoles.map((r) => r.toLowerCase());
   return (req, res, next) => {
-    if (!req.user?.role) {
-      return res.status(401).json({ success: false, message: "Chưa đăng nhập" });
+    if (!req.user || !req.user.role) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Chưa đăng nhập" });
     }
+
     if (!allowed.includes(req.user.role)) {
       return res
         .status(403)
         .json({ success: false, message: "Không có quyền truy cập tài nguyên này" });
     }
-    next();
+
+    return next();
   };
 }
 
 /**
- * 🧱 Chỉ Admin
+ * Chỉ admin
  */
 export function requireAdmin(req, res, next) {
-  if (!req.user?.role) {
-    return res.status(401).json({ success: false, message: "Chưa đăng nhập" });
+  if (!req.user || !req.user.role) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Chưa đăng nhập" });
   }
-  if (normalizeRole(req.user.role) !== "admin") {
-    return res.status(403).json({ success: false, message: "Chỉ Admin mới được truy cập" });
+
+  if (req.user.role !== "admin") {
+    return res
+      .status(403)
+      .json({ success: false, message: "Chỉ admin mới được truy cập" });
   }
-  next();
+
+  return next();
 }
 
-// ===== 💡 PHẦN MỚI THÊM VÀO (QUAN TRỌNG) =====
 /**
- * 👤 Middleware tùy chọn: Tải người dùng nếu đã đăng nhập,
- * nhưng không báo lỗi nếu là khách.
+ * Nếu có token thì gắn req.user, nếu không thì bỏ qua (dùng cho chatbot, khách vãng lai)
  */
 export async function loadUserIfAuthenticated(req, res, next) {
   try {
     const token = getAccessToken(req);
     if (!token) {
-      return next(); // Không có token, tiếp tục (req.user sẽ là undefined)
+      return next();
     }
-
-    const decoded = jwt.verify(token, ACCESS_SECRET);
-    const id_tk = decoded.id_tk || decoded.id;
-
-    const account = await Account.findByPk(id_tk);
-    if (account) {
-      // Đính kèm thông tin user vào request
-      req.user = {
-        id_tk: account.id_tk,
-        ten_dn: account.ten_dn,
-        role: normalizeRole(account.role),
-      };
-    }
+    await attachUserFromToken(req);
   } catch (err) {
-    // Token lỗi, hết hạn... Bỏ qua lỗi và không đính kèm req.user
-    console.warn("[loadUserIfAuthenticated] Token không hợp lệ, xử lý như khách vãng lai.");
+    console.warn(
+      "[loadUserIfAuthenticated] Token không hợp lệ, xử lý như khách vãng lai."
+    );
   }
-  // Luôn luôn đi tiếp
   return next();
 }
-// ===== KẾT THÚC PHẦN MỚI =====
+
+/**
+ * ALIAS cho code cũ:
+ * Trước đây bạn dùng `authMiddleware` → bây giờ map sang `requireAuth`
+ * để không phải sửa hết các routes.
+ */
+export const authMiddleware = requireAuth;
