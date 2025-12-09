@@ -642,19 +642,19 @@ export async function getOrdersAdmin(req, res) {
 
     // Các trạng thái “chưa xong” – cần admin/nhân viên xử lý
     const ACTIVE_STATUSES = [
-      "pending",          // Chờ xác nhận
-      "pending_payment",  // Chờ thanh toán
-      "confirmed",        // Đã xác nhận
-      "PREORDER",         // Đặt trước
-      "shipped",          // Đang giao (hoặc đã chuyển giao)
+      "pending", // Chờ xác nhận
+      "pending_payment", // Chờ thanh toán
+      "confirmed", // Đã xác nhận
+      "PREORDER", // Đặt trước
+      "shipped", // Đang giao (hoặc đã chuyển giao)
     ];
 
     // Các trạng thái đã kết thúc (hoàn thành / hủy / đã thanh toán xong)
     const COMPLETED_STATUSES = [
-      "completed",  // Đã hoàn thành
-      "done",       // Đã hoàn thành (trạng thái cũ)
-      "paid",       // Đã thanh toán
-      "cancelled",  // Đã hủy
+      "completed", // Đã hoàn thành
+      "done", // Đã hoàn thành (trạng thái cũ)
+      "paid", // Đã thanh toán
+      "cancelled", // Đã hủy
     ];
 
 
@@ -666,9 +666,13 @@ export async function getOrdersAdmin(req, res) {
     }
 
     if (date) {
-      const start = new Date(date + "T00:00:00.000");
-      const end = new Date(date + "T23:59:59.999");
-      where.ngay_dat = { [Op.between]: [start, end] };
+      // ⚠️ CẬP NHẬT ĐỂ ĐẢM BẢO LỌC THEO NGÀY CHÍNH XÁC (Tránh lỗi múi giờ)
+      // Thay vì dùng [Op.between] với JS Date, ta dùng hàm DATE() của DB
+      where.ngay_dat = db.sequelize.where(
+        db.sequelize.fn("DATE", db.sequelize.col("ngay_dat")),
+        "=",
+        date
+      );
     }
 
     // 5. Query có phân trang
@@ -893,6 +897,3 @@ export async function getAdminOrderStats(req, res) {
     });
   }
 }
-
-
-

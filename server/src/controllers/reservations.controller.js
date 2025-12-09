@@ -1,6 +1,6 @@
 // src/controllers/reservations.controller.js
 // ================================
-// ☕ Coffee Shop Backend - Reservations Controller (Fixed)
+// ☕ Coffee Shop Backend - Reservations Controller (Updated)
 // ================================
 import Reservation from "../models/Reservation.js";
 import Customer from "../models/Customer.js";
@@ -17,6 +17,8 @@ import db from "../models/index.js";
 import {
   getCurrentWeekRange,
   getCurrentMonthRange,
+  // 💡 CẬP NHẬT: Thêm getCurrentYearRange cho chức năng export
+  getCurrentYearRange, 
 } from "../utils/dateRange.js";
 
 // Helper: validate ngày / giờ
@@ -134,7 +136,7 @@ export async function createReservation(req, res) {
           dia_chi_nhan: "Đặt tại quán (Pre-order for Reservation)",
           email_nhan: customer.email,
           pttt: "COD",
-          trang_thai: "pending",
+          trang_thai: "PENDING", // Giữ nguyên PENDING cho đơn đặt trước
           tong_tien,
           ghi_chu: `Đặt trước cho bàn ngày ${ngay_dat} lúc ${gio_dat}`,
         },
@@ -216,11 +218,34 @@ export async function getMyReservations(req, res) {
 }
 
 /**
- * 🧾 Admin xem toàn bộ đơn
+ * 🧾 Admin xem toàn bộ đơn (Cập nhật: THÊM LỌC THEO KHOẢNG NGÀY startDate/endDate)
  */
 export async function getAllReservations(req, res) {
   try {
+    // 💡 Lấy tham số startDate và endDate từ query
+    const { startDate, endDate } = req.query; 
+    const where = {};
+
+    // ✅ LOGIC LỌC THEO KHOẢNG NGÀY
+    if (startDate && endDate && isValidDateString(startDate) && isValidDateString(endDate)) {
+        // Lọc theo ngay_dat nằm trong khoảng [startDate, endDate]
+        // 🔹 Đặt ngày bắt đầu về 00:00:00.000 (để lấy từ đầu ngày)
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0); 
+        
+        // 🔹 Đặt ngày kết thúc về 23:59:59.999 (để lấy đến cuối ngày)
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); 
+        
+        where.ngay_dat = {
+            [Op.between]: [start, end], 
+        };
+    } 
+    // 💡 Lưu ý: Đã loại bỏ logic lọc theo date đơn lẻ cũ vì frontend AdminReservations.jsx 
+    // giờ đã sử dụng lọc theo khoảng ngày startDate/endDate
+
     const reservations = await Reservation.findAll({
+      where: where, // Áp dụng bộ lọc ngày (nếu có)
       include: [
         {
           model: Customer,
@@ -317,6 +342,7 @@ export async function updateReservationStatus(req, res) {
 
     let statusLabel = "";
     if (status === "CONFIRMED") statusLabel = "Đã xác nhận";
+    if (status === "ARRIVED") statusLabel = "Đã đến"; // 💡 THÊM ARRIVED
     if (status === "CANCELLED") statusLabel = "Đã hủy";
     if (status === "DONE") statusLabel = "Đã hoàn thành";
 
@@ -333,21 +359,39 @@ export async function updateReservationStatus(req, res) {
 }
 
 /**
- * ❌ Admin xóa đặt bàn
+ * ❌ Admin xóa đặt bàn (Đã cập nhật: Dùng Transaction + Xử lý Pre-Order)
  */
 export async function deleteReservation(req, res) {
+  const t = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const reservation = await Reservation.findByPk(id);
+    const reservation = await Reservation.findByPk(id, { transaction: t });
 
-    if (!reservation)
+    if (!reservation) {
+      await t.rollback();
       return res
         .status(404)
         .json({ success: false, message: "Không tìm thấy" });
+    }
 
-    await reservation.destroy();
+    // 💡 Xử lý Đơn đặt trước (Pre-Order) liên quan
+    if (reservation.id_don_dat_truoc) {
+      const preOrder = await Order.findByPk(reservation.id_don_dat_truoc, { transaction: t });
+      if (preOrder && preOrder.trang_thai === "PENDING") {
+        // Nếu đơn đặt trước còn PENDING, HỦY nó
+        await preOrder.update({ trang_thai: "CANCELLED", ghi_chu: `Đã hủy do Đặt bàn #${id} bị xóa` }, { transaction: t });
+        console.log(`[Transaction] Đã hủy đơn đặt trước #${preOrder.id_don} do xóa đặt bàn #${id}`);
+      }
+      // Các trạng thái khác (CONFIRMED/COMPLETED) sẽ được giữ lại
+    }
+
+    await reservation.destroy({ transaction: t });
+    
+    await t.commit();
     res.json({ success: true, message: "Đã xóa thành công" });
   } catch (err) {
+    await t.rollback();
+    console.error("Lỗi xóa đặt bàn:", err);
     res
       .status(500)
       .json({ success: false, message: "Lỗi xóa", error: err.message });
@@ -377,6 +421,8 @@ export async function getBusySlots(req, res) {
         ],
         trang_thai: {
           [Op.or]: [
+            "pending", // Cho phép hiển thị pending để admin/khách thấy đơn đang chờ
+            "PENDING",
             "confirmed",
             "CONFIRMED",
             "Confirmed",
@@ -509,7 +555,7 @@ export async function getReservationStats(req, res) {
     res.json({
       success: true,
       data: {
-        period,                // "week" | "month"
+        period,                // "week" | "month"
         range: { start, end }, // nếu sau này bạn muốn tính thêm gì cũng dễ
         totalReservations,
         successfulReservations,
@@ -544,11 +590,21 @@ function escapeReservationCsv(value) {
  */
 export async function exportReservationStatsCsv(req, res) {
   try {
-    const period = (req.query.period || "month").toLowerCase();
+    const rawPeriod = (req.query.period || "month").toLowerCase();
     let range;
-    if (period === "month") range = getCurrentMonthRange();
-    else if (period === "year") range = getCurrentYearRange();
-    else range = getCurrentWeekRange();
+    let period;
+
+    // 💡 CẬP NHẬT: Dùng logic tương tự Orders Controller để gán period chuẩn
+    if (rawPeriod === "month") {
+      range = getCurrentMonthRange();
+      period = "month";
+    } else if (rawPeriod === "year") {
+      range = getCurrentYearRange(); // Đã thêm vào import
+      period = "year";
+    } else {
+      range = getCurrentWeekRange();
+      period = "week";
+    }
 
     const { start, end } = range;
 
@@ -581,8 +637,7 @@ export async function exportReservationStatsCsv(req, res) {
       ],
     });
 
-    const esc = (val) =>
-      `"${String(val ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+    const esc = escapeReservationCsv; // Sử dụng helper đã định nghĩa
 
     let csv =
       "ID đặt bàn,Ngày đặt,Giờ,Khách hàng,Email,SĐT,Số người,Bàn,Trạng thái\n";
@@ -619,7 +674,8 @@ export async function exportReservationStatsCsv(req, res) {
       "Content-Disposition",
       `attachment; filename="${filename}"`
     );
-    res.send("\uFEFF" + csv);
+    // Thêm Byte Order Mark (BOM) cho Excel mở tiếng Việt không bị lỗi font
+    res.send("\uFEFF" + csv); 
   } catch (err) {
     console.error("exportReservationStatsCsv error:", err);
     res.status(500).json({
