@@ -5,17 +5,18 @@ dotenv.config(); // Đảm bảo biến môi trường được load
 
 // Cấu hình transporter (Lấy từ .env)
 const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_HOST, // VD: smtp.gmail.com
-  port: process.env.MAIL_PORT || 587, // 587 for TLS, 465 for SSL
-  secure: (process.env.MAIL_PORT || '587') === '465', // true for 465, false for other ports
+  host: process.env.MAIL_HOST,
+  port: Number(process.env.MAIL_PORT) || 587,
+  secure: String(process.env.MAIL_SECURE) === "true" || Number(process.env.MAIL_PORT) === 465,
   auth: {
-    user: process.env.MAIL_USER, // địa chỉ email gửi
-    pass: process.env.MAIL_PASS, // mật khẩu email hoặc app password
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
   },
   tls: {
-      rejectUnauthorized: process.env.NODE_ENV === 'production' // Bỏ qua lỗi chứng chỉ nếu đang dev
-  }
+    rejectUnauthorized: process.env.NODE_ENV === "production",
+  },
 });
+
 
 // Hàm tạo nội dung email HTML (ví dụ)
 function createOrderConfirmationHtml(order, orderDetails) {

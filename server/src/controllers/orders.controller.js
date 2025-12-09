@@ -20,6 +20,7 @@ import {
 import {
   getCurrentWeekRange,
   getCurrentMonthRange,
+  getCurrentYearRange, // 💡 thêm cho export year
 } from "../utils/dateRange.js";
 
 // Lấy các model còn lại từ db
@@ -104,6 +105,60 @@ async function awardPointsIfEligible(order) {
   }
 }
 
+/**
+ * 🔔 Helper: Gửi email hóa đơn khi đơn được thanh toán / hoàn thành
+ * - Chỉ gửi khi trạng thái chuyển sang: paid | completed | done
+ * - Không gửi lại nếu trước đó đã ở 1 trong các trạng thái này
+ */
+async function sendInvoiceEmailIfStatusCompleted(prevStatus, newStatus, orderId) {
+  const paidLikeStatuses = ["paid", "completed", "done"];
+
+  const wasPaidLike = paidLikeStatuses.includes(
+    (prevStatus || "").toLowerCase()
+  );
+  const isNowPaidLike = paidLikeStatuses.includes(
+    (newStatus || "").toLowerCase()
+  );
+
+  // Chỉ gửi nếu từ trạng thái chưa xong → sang trạng thái đã thanh toán / hoàn thành
+  if (!isNowPaidLike || wasPaidLike) return;
+
+  try {
+    const fullOrder = await Order.findByPk(orderId, {
+      include: [
+        {
+          model: OrderDetail,
+          include: [{ model: Product, attributes: ["id_mon", "ten_mon"] }],
+        },
+      ],
+    });
+
+    if (!fullOrder) return;
+    if (!fullOrder.email_nhan) {
+      console.warn(
+        `Đơn hàng #${orderId} không có email_nhan, bỏ qua gửi hóa đơn.`
+      );
+      return;
+    }
+
+    const orderDetailsForMail = (fullOrder.OrderDetails || []).map((d) => ({
+      id_mon: d.id_mon,
+      so_luong: d.so_luong,
+      gia: d.gia,
+      Product: {
+        ten_mon: d.Product?.ten_mon || "Sản phẩm",
+      },
+    }));
+
+    await sendOrderConfirmationEmail(fullOrder, orderDetailsForMail);
+  } catch (err) {
+    console.error(
+      `sendInvoiceEmailIfStatusCompleted error for order #${orderId}:`,
+      err?.message || err
+    );
+  }
+}
+
 // ========== Lịch sử đơn của tôi ==========
 export async function getMyOrders(req, res) {
   try {
@@ -173,6 +228,7 @@ export async function getMyOrders(req, res) {
 
 /**
  * 🛒 Tạo đơn hàng (có áp dụng khuyến mãi & voucher)
+ * ➕ ĐÃ THÊM: Gửi email xác nhận ngay sau khi tạo đơn (nếu có email_nhan)
  */
 export async function createOrder(req, res) {
   const {
@@ -415,6 +471,25 @@ export async function createOrder(req, res) {
       });
     }
 
+    // 💌 GỬI EMAIL XÁC NHẬN ĐƠN HÀNG (nếu có email_nhan)
+    if (email_nhan) {
+      try {
+        const orderDetailsForMail = productDetails.map((d) => ({
+          id_mon: d.id_mon,
+          so_luong: d.so_luong,
+          gia: d.gia,
+          Product: { ten_mon: d.Product?.ten_mon || "Sản phẩm" },
+        }));
+        await sendOrderConfirmationEmail(newOrder, orderDetailsForMail);
+      } catch (mailErr) {
+        console.error(
+          `❌ Lỗi gửi email xác nhận cho đơn #${newOrder.id_don}:`,
+          mailErr?.message || mailErr
+        );
+        // Không throw, để không làm fail việc tạo đơn
+      }
+    }
+
     return res.status(201).json({
       success: true,
       message: "Tạo đơn hàng thành công!",
@@ -495,6 +570,7 @@ export async function getOrderById(req, res) {
 
 /**
  * 🔄 Cập nhật trạng thái (Admin)
+ * ➕ ĐÃ THÊM: gửi email hóa đơn khi chuyển sang paid/completed/done
  */
 export async function updateOrderStatus(req, res) {
   try {
@@ -579,6 +655,9 @@ export async function updateOrderStatus(req, res) {
       await awardPointsIfEligible(order);
     }
 
+    // 💌 GỬI EMAIL HÓA ĐƠN NẾU CHUYỂN SANG paid/completed/done
+    await sendInvoiceEmailIfStatusCompleted(prevStatus, newStatus, order.id_don);
+
     res.json({
       success: true,
       message: "Cập nhật thành công",
@@ -657,7 +736,6 @@ export async function getOrdersAdmin(req, res) {
       "cancelled", // Đã hủy
     ];
 
-
     if (tab === "completed") {
       where.trang_thai = { [Op.in]: COMPLETED_STATUSES };
     } else {
@@ -666,13 +744,14 @@ export async function getOrdersAdmin(req, res) {
     }
 
     if (date) {
-      // ⚠️ CẬP NHẬT ĐỂ ĐẢM BẢO LỌC THEO NGÀY CHÍNH XÁC (Tránh lỗi múi giờ)
-      // Thay vì dùng [Op.between] với JS Date, ta dùng hàm DATE() của DB
-      where.ngay_dat = db.sequelize.where(
-        db.sequelize.fn("DATE", db.sequelize.col("ngay_dat")),
-        "=",
-        date
-      );
+      // date từ FE dạng 'YYYY-MM-DD' (ngày LOCAL – ví dụ VN +7)
+      // Tạo khoảng thời gian từ 00:00:00 đến 23:59:59.999 LOCAL
+      const startOfDay = new Date(`${date}T00:00:00`);
+      const endOfDay = new Date(`${date}T23:59:59.999`);
+
+      where.ngay_dat = {
+        [Op.between]: [startOfDay, endOfDay],
+      };
     }
 
     // 5. Query có phân trang
@@ -764,9 +843,7 @@ export async function exportAdminOrdersCsv(req, res) {
 
       return [
         o.id_don,
-        o.ngay_dat
-          ? new Date(o.ngay_dat).toLocaleString("vi-VN")
-          : "",
+        o.ngay_dat ? new Date(o.ngay_dat).toLocaleString("vi-VN") : "",
         o.Customer?.ho_ten || o.ho_ten_nhan || "Khách vãng lai",
         o.Customer?.email || o.email_nhan || "",
         o.Customer?.sdt || o.sdt_nhan || "",
@@ -887,6 +964,8 @@ export async function getAdminOrderStats(req, res) {
         completedPercent,
         cancelledPercent,
         periodRevenue: Number(revenue) || 0,
+        // Giữ compatibility với code FE cũ (periodRevenue vs revenue)
+        revenue: Number(revenue) || 0,
       },
     });
   } catch (err) {
