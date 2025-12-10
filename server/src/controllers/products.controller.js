@@ -42,7 +42,24 @@ export async function getAllProducts(req, res) {
     // 🔥 Lấy danh sách khuyến mãi đang active "ngay lúc này"
     // (đúng ngày, đúng thứ, đúng giờ, và đang bật hiển thị)
     const activePromos = await getActivePromotionsNow();
-
+// 📌 DEBUG LOG để biết BE có đọc được KM hay không
+console.log("===== DEBUG getAllProducts() =====");
+console.log("Thời điểm hiện tại:", new Date().toISOString());
+console.log("Số lượng sản phẩm:", products.length);
+console.log(
+  "Khuyến mãi đang ACTIVE:",
+  activePromos.map((p) => ({
+    id_km: p.id_km,
+    ten_km: p.ten_km,
+    loai_km: p.loai_km,
+    target: p.target_type,
+    lap_lai_thu: p.lap_lai_thu,
+    gio_bd: p.gio_bd,
+    gio_kt: p.gio_kt,
+    productIds: p.productIds,
+  }))
+);
+console.log("==================================");
     // Áp khuyến mãi vào từng sản phẩm
     const result = products.map((p) => {
       const raw = p.toJSON();
