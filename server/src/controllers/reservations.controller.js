@@ -17,16 +17,17 @@ import db from "../models/index.js";
 import {
   getCurrentWeekRange,
   getCurrentMonthRange,
-  // 💡 CẬP NHẬT: Thêm getCurrentYearRange cho chức năng export
-  getCurrentYearRange, 
+  getCurrentYearRange,
 } from "../utils/dateRange.js";
+
+// ✅ NEW: mailer for reservation
+import { sendReservationEmail } from "../utils/mailer.js";
 
 // Helper: validate ngày / giờ
 const isValidDateString = (str) => /^\d{4}-\d{2}-\d{2}$/.test(str || "");
 const isValidTimeString = (str) => /^\d{2}:\d{2}$/.test(str || "");
 
 // 🔹 Các trạng thái được tính là "thành công" / "đã hủy" cho THỐNG KÊ đặt bàn
-// ❗ Không thay đổi trạng thái bạn đang lưu trong DB.
 const SUCCESS_RESERVATION_STATUSES = [
   "CONFIRMED",
   "DONE",
@@ -35,10 +36,7 @@ const SUCCESS_RESERVATION_STATUSES = [
   "ĐÃ HOÀN THÀNH",
 ];
 
-const CANCELLED_RESERVATION_STATUSES = [
-  "CANCELLED",
-  "ĐÃ HỦY",
-];
+const CANCELLED_RESERVATION_STATUSES = ["CANCELLED", "ĐÃ HỦY"];
 
 // 💡 --- Helper Function: Hàm gửi thông báo (Nội bộ) ---
 async function sendReservationNotification(reservation, newStatusLabel) {
@@ -72,16 +70,8 @@ export async function createReservation(req, res) {
   const t = await sequelize.transaction();
 
   try {
-    const {
-      ho_ten,
-      sdt,
-      ngay_dat,
-      gio_dat,
-      so_nguoi,
-      ghi_chu,
-      id_ban,
-      items,
-    } = req.body;
+    const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu, id_ban, items } =
+      req.body;
 
     // ✅ Validate ngày & giờ trước khi làm gì khác
     if (!isValidDateString(ngay_dat) || !isValidTimeString(gio_dat)) {
@@ -92,7 +82,9 @@ export async function createReservation(req, res) {
       });
     }
 
-    const customer = await Customer.findOne({ where: { id_tk: req.user.id_tk } });
+    const customer = await Customer.findOne({
+      where: { id_tk: req.user.id_tk },
+    });
     if (!customer) {
       await t.rollback();
       return res.status(400).json({
@@ -136,7 +128,7 @@ export async function createReservation(req, res) {
           dia_chi_nhan: "Đặt tại quán (Pre-order for Reservation)",
           email_nhan: customer.email,
           pttt: "COD",
-          trang_thai: "PENDING", // Giữ nguyên PENDING cho đơn đặt trước
+          trang_thai: "PENDING",
           tong_tien,
           ghi_chu: `Đặt trước cho bàn ngày ${ngay_dat} lúc ${gio_dat}`,
         },
@@ -171,6 +163,32 @@ export async function createReservation(req, res) {
 
     await t.commit();
 
+    // ✅ GỬI EMAIL "ĐÃ NHẬN YÊU CẦU" (PENDING)
+    try {
+      const table = id_ban ? await Table.findByPk(id_ban) : null;
+
+      let preOrderFull = null;
+      let preOrderDetails = [];
+      if (preOrderId) {
+        preOrderFull = await Order.findByPk(preOrderId);
+        preOrderDetails = await OrderDetail.findAll({
+          where: { id_don: preOrderId },
+          include: [{ model: Product, attributes: ["ten_mon"] }],
+        });
+      }
+
+      await sendReservationEmail({
+        reservation: newR,
+        customer,
+        table,
+        status: "PENDING",
+        preOrder: preOrderFull,
+        preOrderDetails,
+      });
+    } catch (e) {
+      console.error("❌ Gửi email đặt bàn (PENDING) lỗi:", e.message);
+    }
+
     res.status(201).json({
       success: true,
       message: "Đặt bàn thành công",
@@ -192,7 +210,8 @@ export async function createReservation(req, res) {
  */
 export async function getMyReservations(req, res) {
   try {
-    const accountId = req.user?.id;
+    // ✅ FIX: dùng id_tk cho đúng với chỗ khác
+    const accountId = req.user?.id_tk;
     const customer = await Customer.findOne({ where: { id_tk: accountId } });
 
     if (!customer)
@@ -222,30 +241,28 @@ export async function getMyReservations(req, res) {
  */
 export async function getAllReservations(req, res) {
   try {
-    // 💡 Lấy tham số startDate và endDate từ query
-    const { startDate, endDate } = req.query; 
+    const { startDate, endDate } = req.query;
     const where = {};
 
-    // ✅ LOGIC LỌC THEO KHOẢNG NGÀY
-    if (startDate && endDate && isValidDateString(startDate) && isValidDateString(endDate)) {
-        // Lọc theo ngay_dat nằm trong khoảng [startDate, endDate]
-        // 🔹 Đặt ngày bắt đầu về 00:00:00.000 (để lấy từ đầu ngày)
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0); 
-        
-        // 🔹 Đặt ngày kết thúc về 23:59:59.999 (để lấy đến cuối ngày)
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999); 
-        
-        where.ngay_dat = {
-            [Op.between]: [start, end], 
-        };
-    } 
-    // 💡 Lưu ý: Đã loại bỏ logic lọc theo date đơn lẻ cũ vì frontend AdminReservations.jsx 
-    // giờ đã sử dụng lọc theo khoảng ngày startDate/endDate
+    if (
+      startDate &&
+      endDate &&
+      isValidDateString(startDate) &&
+      isValidDateString(endDate)
+    ) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      where.ngay_dat = {
+        [Op.between]: [start, end],
+      };
+    }
 
     const reservations = await Reservation.findAll({
-      where: where, // Áp dụng bộ lọc ngày (nếu có)
+      where,
       include: [
         {
           model: Customer,
@@ -322,8 +339,8 @@ export async function updateReservationStatus(req, res) {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const reservation = await Reservation.findByPk(id);
 
+    const reservation = await Reservation.findByPk(id);
     if (!reservation)
       return res
         .status(404)
@@ -340,9 +357,39 @@ export async function updateReservationStatus(req, res) {
 
     await reservation.update({ trang_thai: status });
 
+    // ✅ GỬI EMAIL KHI ADMIN/EMPLOYEE CẬP NHẬT TRẠNG THÁI
+    try {
+      const customer = await Customer.findByPk(reservation.id_kh);
+      const table = reservation.id_ban
+        ? await Table.findByPk(reservation.id_ban)
+        : null;
+
+      let preOrderFull = null;
+      let preOrderDetails = [];
+      if (reservation.id_don_dat_truoc) {
+        preOrderFull = await Order.findByPk(reservation.id_don_dat_truoc);
+        preOrderDetails = await OrderDetail.findAll({
+          where: { id_don: reservation.id_don_dat_truoc },
+          include: [{ model: Product, attributes: ["ten_mon"] }],
+        });
+      }
+
+      await sendReservationEmail({
+        reservation,
+        customer,
+        table,
+        status,
+        preOrder: preOrderFull,
+        preOrderDetails,
+      });
+    } catch (e) {
+      console.error("❌ Gửi email đặt bàn (update status) lỗi:", e.message);
+    }
+
+    // Gửi notification nội bộ như bạn đang làm
     let statusLabel = "";
     if (status === "CONFIRMED") statusLabel = "Đã xác nhận";
-    if (status === "ARRIVED") statusLabel = "Đã đến"; // 💡 THÊM ARRIVED
+    if (status === "ARRIVED") statusLabel = "Đã đến";
     if (status === "CANCELLED") statusLabel = "Đã hủy";
     if (status === "DONE") statusLabel = "Đã hoàn thành";
 
@@ -350,7 +397,11 @@ export async function updateReservationStatus(req, res) {
       sendReservationNotification(reservation, statusLabel);
     }
 
-    res.json({ success: true, message: "Cập nhật thành công", data: reservation });
+    res.json({
+      success: true,
+      message: "Cập nhật thành công",
+      data: reservation,
+    });
   } catch (err) {
     res
       .status(500)
@@ -374,19 +425,26 @@ export async function deleteReservation(req, res) {
         .json({ success: false, message: "Không tìm thấy" });
     }
 
-    // 💡 Xử lý Đơn đặt trước (Pre-Order) liên quan
     if (reservation.id_don_dat_truoc) {
-      const preOrder = await Order.findByPk(reservation.id_don_dat_truoc, { transaction: t });
+      const preOrder = await Order.findByPk(reservation.id_don_dat_truoc, {
+        transaction: t,
+      });
       if (preOrder && preOrder.trang_thai === "PENDING") {
-        // Nếu đơn đặt trước còn PENDING, HỦY nó
-        await preOrder.update({ trang_thai: "CANCELLED", ghi_chu: `Đã hủy do Đặt bàn #${id} bị xóa` }, { transaction: t });
-        console.log(`[Transaction] Đã hủy đơn đặt trước #${preOrder.id_don} do xóa đặt bàn #${id}`);
+        await preOrder.update(
+          {
+            trang_thai: "CANCELLED",
+            ghi_chu: `Đã hủy do Đặt bàn #${id} bị xóa`,
+          },
+          { transaction: t }
+        );
+        console.log(
+          `[Transaction] Đã hủy đơn đặt trước #${preOrder.id_don} do xóa đặt bàn #${id}`
+        );
       }
-      // Các trạng thái khác (CONFIRMED/COMPLETED) sẽ được giữ lại
     }
 
     await reservation.destroy({ transaction: t });
-    
+
     await t.commit();
     res.json({ success: true, message: "Đã xóa thành công" });
   } catch (err) {
@@ -421,7 +479,7 @@ export async function getBusySlots(req, res) {
         ],
         trang_thai: {
           [Op.or]: [
-            "pending", // Cho phép hiển thị pending để admin/khách thấy đơn đang chờ
+            "pending",
             "PENDING",
             "confirmed",
             "CONFIRMED",
@@ -437,7 +495,6 @@ export async function getBusySlots(req, res) {
       },
       attributes: ["gio_dat", "trang_thai"],
       order: [["gio_dat", "ASC"]],
-
     });
 
     console.log(`✅ Tìm thấy ${bookings.length} đơn.`);
@@ -460,7 +517,6 @@ export async function createReservationFromChatbot(req, draft) {
   try {
     const { ho_ten, sdt, ngay_dat, gio_dat, so_nguoi, ghi_chu } = draft;
 
-    // ✅ Validate ngày/giờ cho chatbot luôn
     if (!isValidDateString(ngay_dat) || !isValidTimeString(gio_dat)) {
       await t.rollback();
       throw new Error("Ngày/giờ đặt bàn (chatbot) không hợp lệ.");
@@ -499,12 +555,12 @@ export async function createReservationFromChatbot(req, draft) {
     throw err;
   }
 }
+
 /**
  * 📊 Thống kê đặt bàn cho Admin theo tuần / tháng
  */
 export async function getReservationStats(req, res) {
   try {
-    // CHỈ CHO PHÉP: week | month
     const rawPeriod = (req.query.period || "month").toLowerCase();
     const period = rawPeriod === "week" ? "week" : "month";
 
@@ -515,7 +571,7 @@ export async function getReservationStats(req, res) {
     const { start, end } = range;
 
     const rows = await Reservation.findAll({
-      attributes: ["trang_thai", [fn("COUNT", col("id_datban")), "count"] ],
+      attributes: ["trang_thai", [fn("COUNT", col("id_datban")), "count"]],
       where: {
         ngay_dat: { [Op.between]: [start, end] },
       },
@@ -530,17 +586,13 @@ export async function getReservationStats(req, res) {
 
     const successfulReservations = rows
       .filter((r) =>
-        SUCCESS_RESERVATION_STATUSES.includes(
-          (r.trang_thai || "").toUpperCase()
-        )
+        SUCCESS_RESERVATION_STATUSES.includes((r.trang_thai || "").toUpperCase())
       )
       .reduce((sum, r) => sum + Number(r.count || 0), 0);
 
     const cancelledReservations = rows
       .filter((r) =>
-        CANCELLED_RESERVATION_STATUSES.includes(
-          (r.trang_thai || "").toUpperCase()
-        )
+        CANCELLED_RESERVATION_STATUSES.includes((r.trang_thai || "").toUpperCase())
       )
       .reduce((sum, r) => sum + Number(r.count || 0), 0);
 
@@ -555,8 +607,8 @@ export async function getReservationStats(req, res) {
     res.json({
       success: true,
       data: {
-        period,                // "week" | "month"
-        range: { start, end }, // nếu sau này bạn muốn tính thêm gì cũng dễ
+        period,
+        range: { start, end },
         totalReservations,
         successfulReservations,
         cancelledReservations,
@@ -586,7 +638,6 @@ function escapeReservationCsv(value) {
 
 /**
  * 📤 Xuất danh sách đặt bàn theo kỳ (week / month / year) dưới dạng CSV
- * Đường dẫn gợi ý: GET /api/admin/reservations/export?period=month
  */
 export async function exportReservationStatsCsv(req, res) {
   try {
@@ -594,12 +645,11 @@ export async function exportReservationStatsCsv(req, res) {
     let range;
     let period;
 
-    // 💡 CẬP NHẬT: Dùng logic tương tự Orders Controller để gán period chuẩn
     if (rawPeriod === "month") {
       range = getCurrentMonthRange();
       period = "month";
     } else if (rawPeriod === "year") {
-      range = getCurrentYearRange(); // Đã thêm vào import
+      range = getCurrentYearRange();
       period = "year";
     } else {
       range = getCurrentWeekRange();
@@ -612,13 +662,7 @@ export async function exportReservationStatsCsv(req, res) {
       where: {
         ngay_dat: { [Op.between]: [start, end] },
       },
-      attributes: [
-        "id_datban",
-        "ngay_dat",
-        "gio_dat",
-        "so_nguoi",
-        "trang_thai",
-      ],
+      attributes: ["id_datban", "ngay_dat", "gio_dat", "so_nguoi", "trang_thai"],
       include: [
         {
           model: Customer,
@@ -637,7 +681,7 @@ export async function exportReservationStatsCsv(req, res) {
       ],
     });
 
-    const esc = escapeReservationCsv; // Sử dụng helper đã định nghĩa
+    const esc = escapeReservationCsv;
 
     let csv =
       "ID đặt bàn,Ngày đặt,Giờ,Khách hàng,Email,SĐT,Số người,Bàn,Trạng thái\n";
@@ -670,12 +714,8 @@ export async function exportReservationStatsCsv(req, res) {
     const filename = `reservations_${period}_${todayStr}.csv`;
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${filename}"`
-    );
-    // Thêm Byte Order Mark (BOM) cho Excel mở tiếng Việt không bị lỗi font
-    res.send("\uFEFF" + csv); 
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send("\uFEFF" + csv);
   } catch (err) {
     console.error("exportReservationStatsCsv error:", err);
     res.status(500).json({
