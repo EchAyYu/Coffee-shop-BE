@@ -665,11 +665,15 @@ export const handleChatbotImageMessage = async (req, res) => {
             {
               type: "text",
               text:
-                "BẮT BUỘC: trả lời đúng 4 dòng theo format D1-D4.\n" +
-                "D1: mô tả ngắn hình.\n" +
-                "D2-D3: nêu 1 món giống nhất (tên+giá) hoặc 2 món gần nhất (tên+giá) từ MENU.\n" +
-                "D4: hỏi 1 câu ngắn (ví dụ: bạn muốn đặt mấy ly?)\n" +
-                "Tuyệt đối không bịa món ngoài MENU. Chỉ sinh <ORDER_JSON> khi khách CHỐT đặt.",
+              "BẮT BUỘC: trả lời đúng 4 dòng theo format D1-D4, tự nhiên, dễ hiểu.\n" +
+              "D1: 1 câu mô tả ảnh + nhận định nhanh.\n" +
+              "D2-D3: 1–2 bullet '•' giải thích ngắn vì sao bạn nhận định như vậy (màu sắc, topping, dạng ly, đồ ăn/đồ uống...).\n" +
+              "QUAN TRỌNG:\n" +
+              "- Nếu ảnh KHÔNG phải đồ uống/đồ ăn hoặc KHÔNG khớp MENU => nói rõ 'menu hiện chưa có món trùng' và KHÔNG nêu tên món.\n" +
+              "- Nếu ảnh có thể khớp MENU => nêu tối đa 1–2 món gần nhất (tên + giá).\n" +
+              "- Tuyệt đối KHÔNG bịa món ngoài MENU.\n" +
+              "- Chỉ sinh <ORDER_JSON> khi khách CHỐT đặt.\n" +
+              "D4: hỏi 1 câu ngắn để làm rõ nhu cầu (khẩu vị, nóng/lạnh, cà phê/trà, số lượng)."
             },
             { type: "image_url", image_url: { url: dataUrl } },
           ],
@@ -695,7 +699,8 @@ export const handleChatbotImageMessage = async (req, res) => {
     // ép format luôn
     const finalReply = packReplyTo4Lines(reply, {
       missingInfo: true,
-      followUp: "Bạn muốn đặt mấy ly/phần giống vậy?",
+      followUp:
+        "Bạn muốn mình gợi ý theo khẩu vị: cà phê hay trà, nóng hay lạnh, ngọt hay ít ngọt?",
     });
 
     return res.json({ reply: finalReply, orderItems });
