@@ -1,5 +1,15 @@
-// src/utils/dateRange.js
+// utils/dateRange.js
+export function getDayRange(dateStr) {
+  const d = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
 
+  const start = new Date(d);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(d);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
 // 🔹 Hôm nay: [00:00:00, 23:59:59]
 export const getTodayRange = () => {
   const start = new Date();
@@ -10,6 +20,7 @@ export const getTodayRange = () => {
 
   return { start, end };
 };
+
 
 // 🔹 7 ngày / N ngày gần đây (tính cả hôm nay)
 export const getPastDaysRange = (days = 7) => {
