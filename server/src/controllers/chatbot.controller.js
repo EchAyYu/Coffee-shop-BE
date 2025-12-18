@@ -1,8 +1,7 @@
-// server/src/controllers/chatbot.controller.js
 import Groq from "groq-sdk";
 import { Op } from "sequelize";
 import db from "../models/index.js";
-import Voucher from "../models/Voucher.js"; // dùng giống voucher.controller
+import Voucher from "../models/Voucher.js";
 
 const { Product, Category, Promotion, PromotionProduct } = db;
 
@@ -11,22 +10,19 @@ const groq = new Groq({
 });
 
 // ==============================
-// 1. Thông tin quán + helper
+// 1) SHOP INFO + helpers
 // ==============================
 const SHOP_INFO = {
   name: "LO Coffee",
   address: "326A Nguyễn Văn Linh, An Khánh, Ninh Kiều, Cần Thơ Vietnam",
   openHours: "6:00 - 23:00 mỗi ngày",
   phone: "0292 3943 516",
-  payments:
-    "Tiền mặt, chuyển khoản, ví điện tử (Momo, ZaloPay) và quét QR ngân hàng.",
-  delivery:
-    "Giao hàng trong bán kính 5km, phí ship tùy khoảng cách và bên vận chuyển.",
+  payments: "Tiền mặt, chuyển khoản, ví điện tử (Momo, ZaloPay) và quét QR ngân hàng.",
+  delivery: "Giao hàng trong bán kính 5km, phí ship tùy khoảng cách và bên vận chuyển.",
 };
 
 function normalizeReservationDate(raw) {
   if (!raw) return "";
-
   const s = String(raw).trim().toLowerCase();
   const today = new Date();
 
@@ -48,46 +44,79 @@ function normalizeReservationDate(raw) {
     const month = parseInt(m[2], 10) - 1;
     const year = parseInt(m[3], 10);
     const d = new Date(year, month, day);
-    if (!Number.isNaN(d.getTime())) {
-      return d.toISOString().slice(0, 10);
-    }
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
+
   return "";
 }
 
 function normalizeText(str = "") {
-  return str
+  return String(str)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+// ==============================
+// 2) Output control: clamp + sanitize
+// ==============================
+function sanitizeUserFacingText(s) {
+  if (!s) return s;
+  return String(s)
+    .replace(/\(từ\s*database\)/gi, "")
+    .replace(/\bfrom\s*database\b/gi, "")
+    .replace(/\bdatabase\b/gi, "")
+    .replace(/\bmenu\s*\(.*?\)\s*:/gi, "Menu:")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function clampReply(reply, maxLines = 4, maxChars = 520) {
+  if (!reply) return reply;
+
+  let s = String(reply).trim();
+
+  // remove "1) 2) 3)" style
+  s = s.replace(/^\s*\d+\)\s*/gm, "");
+  // normalize bullets
+  s = s.replace(/^\s*[•\-]\s*/gm, "• ");
+  // remove excessive blank lines
+  s = s.replace(/\n{3,}/g, "\n\n").trim();
+
+  // hard clamp by chars
+  if (s.length > maxChars) s = s.slice(0, maxChars).trim() + "…";
+
+  // clamp by lines
+  const lines = s
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  return lines.slice(0, maxLines).join("\n");
+}
+
+// ==============================
+// 3) ORDER JSON mapper (giữ logic)
+// ==============================
 function mapOrderJsonToItems(jsonStr, products) {
   try {
     const parsed = JSON.parse(jsonStr);
     const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
-    if (!rawItems.length || !Array.isArray(products) || !products.length) {
-      return null;
-    }
+    if (!rawItems.length || !Array.isArray(products) || !products.length) return null;
 
     const mapped = [];
 
     for (const it of rawItems) {
       const rawName = String(it.name || it.product_name || "").trim();
       if (!rawName) continue;
+
       const qty = Number(it.quantity) || 1;
       const target = rawName.toLowerCase();
 
       let product =
-        products.find(
-          (p) => (p.ten_mon || "").toLowerCase() === target
-        ) ||
-        products.find((p) =>
-          (p.ten_mon || "").toLowerCase().includes(target)
-        ) ||
-        products.find((p) =>
-          target.includes((p.ten_mon || "").toLowerCase())
-        );
+        products.find((p) => (p.ten_mon || "").toLowerCase() === target) ||
+        products.find((p) => (p.ten_mon || "").toLowerCase().includes(target)) ||
+        products.find((p) => target.includes((p.ten_mon || "").toLowerCase()));
 
       if (product) {
         mapped.push({
@@ -107,32 +136,22 @@ function mapOrderJsonToItems(jsonStr, products) {
   }
 }
 
+// ==============================
+// 4) Build prompt data (rút gọn để model không lan man)
+// ==============================
 function buildMenuText(products = []) {
-  if (!products.length) return "Menu trống hoặc không lấy được dữ liệu.";
-
-  const byCat = {};
-  for (const p of products) {
+  if (!products.length) return "Menu trống.";
+  const items = products.slice(0, 45).map((p) => {
     const catName = p.Category?.ten_dm || "Khác";
-    if (!byCat[catName]) byCat[catName] = [];
-    byCat[catName].push(p);
-  }
-
-  let text = "MENU hiện tại (lấy từ Database):\n";
-  for (const [cat, items] of Object.entries(byCat)) {
-    text += `- ${cat}:\n`;
-    for (const item of items.slice(0, 20)) {
-      text += `   • ${item.ten_mon} (${item.gia} VNĐ)${
-        item.mo_ta ? ` – ${item.mo_ta}` : ""
-      }\n`;
-    }
-  }
-  return text;
+    const price = Number(p.gia || 0).toLocaleString("vi-VN");
+    return `• ${p.ten_mon} - ${price}₫ (${catName})`;
+  });
+  // lưu ý: đây là dữ liệu cho model, không phải text trả khách
+  return `MENU:\n${items.join("\n")}`;
 }
 
 function buildRecommendationText(products = []) {
-  if (!products.length) {
-    return "Chưa có dữ liệu sản phẩm để gợi ý.";
-  }
+  if (!products.length) return "GỢI Ý: (không có dữ liệu)";
 
   const clone = [...products];
 
@@ -140,124 +159,25 @@ function buildRecommendationText(products = []) {
     .slice()
     .sort((a, b) => (b.rating_count || 0) - (a.rating_count || 0))
     .filter((p) => (p.rating_count || 0) > 0)
-    .slice(0, 8);
+    .slice(0, 6);
 
-  const topByRating = clone
-    .slice()
-    .filter((p) => (p.rating_avg || 0) > 0)
-    .sort((a, b) => {
-      const rDiff = (b.rating_avg || 0) - (a.rating_avg || 0);
-      if (Math.abs(rDiff) > 0.01) return rDiff;
-      return (b.rating_count || 0) - (a.rating_count || 0);
-    })
-    .slice(0, 8);
+  const fmt = (p) => {
+    const price = Number(p.gia || 0).toLocaleString("vi-VN");
+    return `${p.ten_mon} (${price}₫)`;
+  };
 
-  const caffeineFree = [];
-  const dairyFree = [];
+  const lines = [];
+  if (topByCount.length) lines.push(`Bán chạy: ${topByCount.slice(0, 4).map(fmt).join(" | ")}`);
 
-  for (const p of products) {
-    const name = (p.ten_mon || "").toLowerCase();
-    const desc = (p.mo_ta || "").toLowerCase();
-    const cat = (p.Category?.ten_dm || "").toLowerCase();
-
-    const isTeaLike =
-      cat.includes("trà") ||
-      cat.includes("tea") ||
-      cat.includes("soda") ||
-      cat.includes("nước ép") ||
-      cat.includes("nuoc ep") ||
-      cat.includes("sinh tố") ||
-      cat.includes("sinh to") ||
-      name.includes("trà") ||
-      name.includes("tea") ||
-      name.includes("soda") ||
-      name.includes("nước ép") ||
-      name.includes("nuoc ep") ||
-      name.includes("sinh tố") ||
-      name.includes("sinh to");
-
-    const hasCoffeeWord =
-      name.includes("cà phê") ||
-      name.includes("ca phe") ||
-      name.includes("espresso") ||
-      name.includes("latte") ||
-      name.includes("americano") ||
-      cat.includes("cà phê") ||
-      cat.includes("ca phe");
-
-    const hasMilkWord =
-      name.includes("sữa") ||
-      name.includes("sua") ||
-      name.includes("milk") ||
-      desc.includes("sữa") ||
-      desc.includes("sua") ||
-      desc.includes("milk") ||
-      cat.includes("trà sữa");
-
-    if (isTeaLike && !hasCoffeeWord) {
-      caffeineFree.push(p);
-    }
-    if (!hasMilkWord) {
-      dairyFree.push(p);
-    }
-  }
-
-  const pickNames = (arr, limit = 6) =>
-    arr
-      .slice(0, limit)
-      .map((p) => `• ${p.ten_mon} (${p.gia} VNĐ)`)
-      .join("\n");
-
-  let text = "DỮ LIỆU GỢI Ý MÓN (từ hệ thống):\n";
-
-  if (topByCount.length) {
-    text += "\n1) Một số món bán chạy (nhiều lượt đánh giá / mua):\n";
-    text += pickNames(topByCount) + "\n";
-  }
-
-  if (topByRating.length) {
-    text += "\n2) Một số món được đánh giá cao:\n";
-    text += pickNames(topByRating) + "\n";
-  }
-
-  if (caffeineFree.length) {
-    text +=
-      "\n3) Gợi ý món ÍT CAFEINE / KHÔNG CAFEINE (trà, nước ép, sinh tố...):\n";
-    text += pickNames(caffeineFree) + "\n";
-  }
-
-  if (dairyFree.length) {
-    text +=
-      "\n4) Gợi ý món ÍT SỮA / KHÔNG SỮA (lọc các món không có 'sữa', 'milk'):\n";
-    text += pickNames(dairyFree) + "\n";
-  }
-
-  const combos = [
-    {
-      name: "Combo sáng tỉnh táo",
-      items: ["Cà phê sữa đá", "Bánh flan"],
-    },
-    {
-      name: "Combo trà trái cây thư giãn",
-      items: ["Trà đào cam sả", "Bánh bông lan trứng muối"],
-    },
-  ];
-
-  if (combos.length) {
-    text += "\n5) Một vài combo gợi ý:\n";
-    for (const c of combos) {
-      text += `• ${c.name}: ${c.items.join(" + ")}\n`;
-    }
-  }
-
-  return text;
+  return `GỢI Ý:\n${lines.join("\n")}`.trim();
 }
 
-// ===== Khuyến mãi từ DB =====
+// ==============================
+// 5) Promotions & Vouchers
+// ==============================
 async function getActivePromotions() {
   const now = new Date();
-
-  const promos = await Promotion.findAll({
+  return Promotion.findAll({
     where: {
       hien_thi: true,
       ngay_bd: { [Op.lte]: now },
@@ -272,8 +192,6 @@ async function getActivePromotions() {
     ],
     order: [["ngay_bd", "ASC"]],
   });
-
-  return promos;
 }
 
 function formatDate(d) {
@@ -291,404 +209,251 @@ function formatDate(d) {
 
 function describePromoTarget(promo) {
   if (!promo) return "";
-
   const tt = promo.target_type || "ALL";
-
-  if (tt === "ALL") {
-    return "Áp dụng cho hầu hết menu (theo điều kiện kèm theo).";
-  }
-  if (tt === "CATEGORY") {
-    return "Áp dụng cho một nhóm món cụ thể (theo danh mục).";
-  }
+  if (tt === "ALL") return "Áp dụng toàn menu (theo điều kiện).";
+  if (tt === "CATEGORY") return "Áp dụng theo danh mục.";
   if (tt === "PRODUCT") {
-    const count = Array.isArray(promo.PromotionProducts)
-      ? promo.PromotionProducts.length
-      : 0;
-    if (count === 0) return "Áp dụng cho một số món cụ thể.";
-    if (count === 1) return "Áp dụng cho 1 món cụ thể.";
-    return `Áp dụng cho khoảng ${count} món cụ thể.`;
+    const count = Array.isArray(promo.PromotionProducts) ? promo.PromotionProducts.length : 0;
+    if (count <= 1) return "Áp dụng cho món cụ thể.";
+    return `Áp dụng cho ~${count} món.`;
   }
-
-  return "Áp dụng theo điều kiện của chương trình.";
+  return "Áp dụng theo điều kiện.";
 }
 
-function buildPromotionsText(promos = []) {
-  if (!promos.length) {
-    return "Hiện tại trong hệ thống chưa có chương trình khuyến mãi nào đang chạy.";
-  }
+function buildPromotionsTextUser(promos = []) {
+  if (!promos.length) return "Hiện chưa có khuyến mãi đang chạy.";
 
-  let text = "Các chương trình khuyến mãi đang áp dụng (lấy từ Database):\n";
-
-  promos.slice(0, 5).forEach((p, idx) => {
+  const lines = promos.slice(0, 4).map((p) => {
     const from = formatDate(p.ngay_bd);
     const to = formatDate(p.ngay_kt);
-    const timeRange =
-      p.gio_bd && p.gio_kt ? `, khung giờ ${p.gio_bd}–${p.gio_kt}` : "";
-
-    text += `\n${idx + 1}) ${p.ten_km}\n`;
-    if (p.mo_ta) {
-      text += `   • Mô tả: ${p.mo_ta}\n`;
-    }
-    text += `   • Thời gian: từ ${from} đến ${to}${timeRange}\n`;
-    text += `   • Phạm vi: ${describePromoTarget(p)}\n`;
-
-    if (p.button_text && p.button_link) {
-      text += `   • Chi tiết: ${p.button_text} (link: ${p.button_link})\n`;
-    }
+    const timeRange = p.gio_bd && p.gio_kt ? ` (${p.gio_bd}-${p.gio_kt})` : "";
+    return `• ${p.ten_km} • ${from}→${to}${timeRange}\n  ${describePromoTarget(p)}`;
   });
 
-  return text;
+  return `Mình kiểm tra hiện có ${promos.length} khuyến mãi:\n${lines.join("\n")}`;
 }
 
-// ===== Voucher từ DB (đổi điểm) =====
-// lấy tương tự listCatalog trong voucher.controller, nhưng đơn giản hơn một chút :contentReference[oaicite:2]{index=2}
 async function getActiveRewardVouchers() {
   const now = new Date();
-
-  const vouchers = await Voucher.findAll({
+  return Voucher.findAll({
     where: {
       active: true,
-      points_cost: { [Op.gt]: 0 }, // chỉ voucher đổi điểm
+      points_cost: { [Op.gt]: 0 },
       [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: now } }],
     },
     order: [["created_at", "DESC"]],
   });
-
-  return vouchers;
 }
 
 function describeVoucherDiscount(v) {
   if (!v) return "";
   const type = v.discount_type;
   const val = Number(v.discount_value || 0);
-  if (type === "percent") {
-    return `${val}% trên tổng giá trị đơn hàng`;
-  }
-  if (type === "fixed") {
-    return `${val.toLocaleString("vi-VN")}₫ trực tiếp vào đơn`;
-  }
-  return "giảm giá theo thiết lập của voucher";
+  if (type === "percent") return `${val}%`;
+  if (type === "fixed") return `${val.toLocaleString("vi-VN")}₫`;
+  return "ưu đãi theo voucher";
 }
 
-function buildVoucherText(vouchers = []) {
-  if (!vouchers.length) {
-    return (
-      "Hiện tại trong hệ thống chưa có voucher đổi điểm nào đang mở. " +
-      "Bạn vẫn có thể tích điểm từ các đơn hàng để đổi voucher khi có chương trình mới nhé!"
-    );
-  }
+function buildVoucherTextUser(vouchers = []) {
+  if (!vouchers.length) return "Hiện chưa có voucher đổi điểm đang mở.";
 
-  let text = "Các voucher đổi điểm đang mở (dùng điểm tích luỹ để đổi):\n";
-
-  vouchers.slice(0, 6).forEach((v, idx) => {
+  const lines = vouchers.slice(0, 4).map((v) => {
     const expires = v.expires_at ? formatDate(v.expires_at) : "Không giới hạn";
-    const minOrder = v.min_order
-      ? `${Number(v.min_order).toLocaleString("vi-VN")}₫`
-      : "Không yêu cầu";
-    const maxDiscount = v.max_discount
-      ? `${Number(v.max_discount).toLocaleString("vi-VN")}₫`
-      : "Theo giá trị giảm";
-
-    text += `\n${idx + 1}) ${v.name}\n`;
-    if (v.description) {
-      text += `   • Mô tả: ${v.description}\n`;
-    }
-    text += `   • Đổi bằng: ${v.points_cost} điểm\n`;
-    text += `   • Ưu đãi: ${describeVoucherDiscount(v)} (tối đa ${maxDiscount})\n`;
-    text += `   • Điều kiện: đơn tối thiểu ${minOrder}\n`;
-    text += `   • Hạn dùng: ${expires}\n`;
+    return `• ${v.name} • ${v.points_cost} điểm • Giảm ${describeVoucherDiscount(v)} • Hạn: ${expires}`;
   });
 
-  text +=
-    "\nLưu ý: Voucher dùng khi thanh toán, mỗi lần chỉ áp dụng 1 mã, " +
-    "và không áp dụng cho đơn hàng đang có sản phẩm khuyến mãi.";
-
-  return text;
+  return `Voucher đổi điểm hiện có:\n${lines.join("\n")}`;
 }
 
-// ===== System prompt chung =====
-function buildSystemPrompt(
-  menuText,
-  recommendationText,
-  promotionsText,
-  voucherText
-) {
-  return `
-Bạn là chatbot hỗ trợ khách hàng của quán ${SHOP_INFO.name}.
-Trả lời thân thiện, ngắn gọn, bằng tiếng Việt. Xưng "mình", gọi khách là "bạn".
+function buildRedeemGuideText() {
+  return (
+    "Cách đổi điểm lấy voucher:\n" +
+    "• Bạn đăng nhập → vào mục Đổi thưởng/Voucher.\n" +
+    "• Chọn voucher muốn đổi → xác nhận.\n" +
+    "• Khi thanh toán, nhập/áp dụng voucher trong giỏ hàng.\n" +
+    "Nếu bạn nói mình biết bạn đang có bao nhiêu điểm, mình gợi ý voucher phù hợp nhé."
+  );
+}
 
-1. Thông tin cơ bản của quán:
+// ==============================
+// 6) System prompt (ngắn gọn bắt buộc)
+// ==============================
+function buildSystemPrompt(menuText, recommendationText, promotionsText, voucherText) {
+  return `
+Bạn là trợ lý bán hàng của quán ${SHOP_INFO.name}. Trả lời tiếng Việt, thân thiện, NGẮN GỌN.
+
+Thông tin quán:
 - Địa chỉ: ${SHOP_INFO.address}
 - Giờ mở cửa: ${SHOP_INFO.openHours}
-- Số điện thoại: ${SHOP_INFO.phone}
+- Hotline: ${SHOP_INFO.phone}
 - Thanh toán: ${SHOP_INFO.payments}
 - Giao hàng: ${SHOP_INFO.delivery}
 
-2. Menu thật của quán (lấy từ hệ thống):
+Dữ liệu menu & gợi ý (dùng để tham chiếu, KHÔNG bịa thêm):
 ${menuText}
 
-3. Dữ liệu gợi ý món nâng cao (bán chạy, được đánh giá cao, ít cafeine, ít sữa):
 ${recommendationText}
 
-4. Thông tin các chương trình khuyến mãi đang chạy (lấy trực tiếp từ Database):
+Khuyến mãi & voucher (tham chiếu):
 ${promotionsText}
-
-5. Thông tin các voucher đổi điểm đang mở (lấy trực tiếp từ Database):
 ${voucherText}
 
-6. Quy tắc dùng voucher (dựa trên hệ thống):
-- Voucher chỉ dùng được nếu đơn hàng KHÔNG có sản phẩm đang khuyến mãi.
-- Mỗi lần thanh toán chỉ áp dụng 1 mã voucher.
-- Đơn hàng phải đạt giá trị tối thiểu (min_order) của voucher nếu có.
-- Mỗi voucher có thể có mức giảm tối đa (max_discount); không được vượt quá.
-- Nếu không thấy voucher phù hợp trong dữ liệu, phải nói là hiện tại hệ thống không ghi nhận.
+QUY TẮC NGẮN GỌN:
+- Tối đa 4 dòng, tránh dài dòng, tránh chia mục 1)2)3).
+- Nếu gợi ý đồ uống: chỉ đưa 2–3 món + giá.
+- Nếu cần hỏi thêm: hỏi tối đa 1–2 câu.
 
-7. Nhiệm vụ chính:
-- Giới thiệu quán, menu đồ uống và bánh.
-- Tư vấn, gợi ý đồ uống DỰA TRÊN DANH SÁCH MÓN TRONG DỮ LIỆU.
-- Khi khách hỏi "món nào bán chạy", "gợi ý đồ uống phổ biến":
-  → Ưu tiên dùng danh sách "món bán chạy" và "được đánh giá cao".
-- Khi khách nói "ít cafeine", "không uống được cà phê":
-  → Ưu tiên dùng các món trong nhóm "ít cafeine / không cafeine".
-- Khi khách nói "không uống được sữa", "dị ứng sữa":
-  → Ưu tiên các món trong nhóm "ít sữa / không sữa".
-- Khi gợi ý, hãy đưa 2–4 món phù hợp, kèm mô tả cực ngắn (tên và giá).
+ĐẶT BÀN:
+- Hỏi lần lượt thông tin còn thiếu: ngày, giờ, số người, tên, SĐT, ghi chú.
+- Khi đủ thông tin và khách đồng ý/chốt: kèm JSON:
+<RESERVATION_JSON>
+{"name":"...","phone":"...","date":"YYYY-MM-DD","time":"HH:mm","people":2,"note":""}
+</RESERVATION_JSON>
 
-8. Khi khách hỏi về khuyến mãi / giảm giá:
-- Sử dụng thông tin khuyến mãi đã cung cấp. Không bịa ra chương trình mới.
-- Có thể gợi ý món phù hợp với các chương trình đó.
-
-9. Khi khách hỏi về voucher / đổi điểm / mã giảm giá:
-- Giải thích dựa trên dữ liệu voucher đang mở và quy tắc dùng voucher.
-- Nếu cần, hướng khách vào mục "Đổi thưởng / Voucher" hoặc "Ví voucher" trên website/app.
-- Không hứa tặng voucher nếu hệ thống không có.
-
-10. Hỗ trợ khách ĐẶT BÀN (booking) theo hội thoại nhiều bước:
-- Nhận diện khi khách muốn đặt bàn.
-- Hỏi lần lượt các thông tin còn thiếu: ngày, giờ, số người, tên, số điện thoại, ghi chú.
-- Không hỏi lại thông tin khách đã cung cấp rõ.
-- Khi đủ thông tin, trả lời tự nhiên và ĐỒNG THỜI thêm JSON ở cuối, dạng:
-  <RESERVATION_JSON>
-  {
-    "name": "...",
-    "phone": "...",
-    "date": "YYYY-MM-DD",
-    "time": "HH:mm",
-    "people": 2,
-    "note": "..."
-  }
-  </RESERVATION_JSON>
-- Không giải thích gì bên trong tag, chỉ để JSON thuần.
-
-11. Hỗ trợ khách ĐẶT MÓN NHANH / THÊM VÀO GIỎ HÀNG:
-- Khi khách nói các câu như:
-  • "Cho mình 2 ly Trà đào cam sả và 1 ly Cà phê sữa đá"
-  • "Mình lấy món số 1 và số 3 bạn vừa gợi ý"
-  • "Chốt cho mình 1 ly matcha đá xay size lớn"
-- Dùng ĐÚNG tên món trong menu (từ dữ liệu ở trên), không bịa thêm món mới.
-- Ở cuối câu trả lời, nếu khách THỰC SỰ muốn đặt món, hãy thêm một khối JSON với cấu trúc:
-  <ORDER_JSON>
-  {
-    "items": [
-      { "name": "Trà đào cam sả", "quantity": 2 },
-      { "name": "Cà phê sữa đá", "quantity": 1 }
-    ]
-  }
-  </ORDER_JSON>
-- Không giải thích gì bên trong tag, chỉ JSON thuần.
-- Nếu khách chỉ hỏi gợi ý tham khảo, CHƯA chốt đặt, thì KHÔNG sinh ORDER_JSON.
-
-12. Với các câu hỏi từ HÌNH ẢNH:
-- Mục tiêu:
-  1) Mô tả nội dung hình (loại đồ uống/bánh, màu sắc, topping, cảm giác hương vị).
-  2) Đoán xem đó là loại đồ uống/bánh gì.
-  3) ĐỐI CHIẾU với danh sách món trong menu:
-     - Nếu tìm được món tương tự hoặc gần giống:
-       • Nêu RÕ tên món trong menu và giá.
-       • Nói kiểu: "Hình này khá giống với món X trong menu quán, giá Y VNĐ."
-     - Nếu KHÔNG có món tương đương:
-       • Nói rõ: quán hiện KHÔNG có món y hệt trong hình.
-       • Gợi ý 2–4 món trong menu có phong cách/hương vị TƯƠNG TỰ nhất.
-- KHÔNG được bịa tên món mới ngoài danh sách menu.
-- Nếu khách nói rõ muốn ĐẶT MÓN dựa trên hình (ví dụ: "cho mình 2 ly giống trong hình",
-  "đặt giúp mình ly này", "order 1 ly như hình"):
-  • Hãy chọn MỘT món trong menu là tương đương nhất với đồ uống trong hình.
-  • Ở CUỐI câu trả lời, sinh thêm khối JSON:
-    <ORDER_JSON>
-    {
-      "items": [
-        { "name": "[Tên món trong menu]", "quantity": SỐ_LƯỢNG }
-      ]
-    }
-    </ORDER_JSON>
-  • Chỉ sinh ORDER_JSON khi khách CHỐT muốn đặt, không chỉ hỏi tham khảo.
-
-13. Quy tắc chung:
-- Chỉ sử dụng các món có trong dữ liệu (menuText, recommendationText). Không bịa món không tồn tại.
-- Chỉ nói về khuyến mãi và voucher dựa trên dữ liệu được cung cấp. Nếu không thấy chương trình tương ứng, hãy nói rõ không có.
-- Nếu câu hỏi không liên quan tới quán cà phê, hãy nói ngắn gọn rằng bạn chỉ hỗ trợ về menu, đặt món, đặt bàn, khuyến mãi, voucher.
-- Luôn thân thiện, không sử dụng ngôn ngữ tục tĩu.
-`;
+THÊM GIỎ NHANH:
+- Khi khách chốt món ("chốt", "lấy", "thêm vào giỏ", "order"): kèm JSON:
+<ORDER_JSON>
+{"items":[{"name":"Tên món trong menu","quantity":1}]}
+</ORDER_JSON>
+- Nếu khách chỉ hỏi tham khảo: KHÔNG sinh ORDER_JSON.
+`.trim();
 }
 
-// FAQ cơ bản
+// ==============================
+// 7) FAQ + Keywords (tách intent chuẩn hơn)
+// ==============================
 const faqRules = [
   {
     id: "open_hours",
-    keywords: [
-      "gio mo cua",
-      "may gio mo cua",
-      "gio dong cua",
-      "mo cua luc nao",
-    ],
-    answer: () =>
-      `Quán ${SHOP_INFO.name} mở cửa từ ${SHOP_INFO.openHours}. Nếu bạn cần giữ bàn giờ cụ thể, cứ nói mình biết nhé!`,
+    keywords: ["gio mo cua", "may gio mo cua", "gio dong cua", "mo cua luc nao"],
+    answer: () => `Quán ${SHOP_INFO.name} mở cửa ${SHOP_INFO.openHours}. Bạn muốn mình giữ bàn giờ nào không?`,
   },
   {
     id: "address",
     keywords: ["dia chi", "dia chi quan", "o dau"],
-    answer: () =>
-      `Hiện tại quán ${SHOP_INFO.name} ở: ${SHOP_INFO.address}. Nếu cần chỉ đường chi tiết, bạn có thể xem thêm ở trang Liên hệ trên website nha.`,
+    answer: () => `Quán ${SHOP_INFO.name} ở: ${SHOP_INFO.address}. Bạn muốn mình gửi link Google Maps không?`,
   },
   {
     id: "phone",
     keywords: ["so dien thoai", "sdt", "hotline", "lien he"],
-    answer: () =>
-      `Hotline của quán là: ${SHOP_INFO.phone}. Bạn có thể gọi trực tiếp nếu cần hỗ trợ gấp hoặc xác nhận đơn/đặt bàn.`,
+    answer: () => `Hotline quán: ${SHOP_INFO.phone}. Bạn cần mình hỗ trợ đặt bàn hay đặt món luôn không?`,
   },
   {
     id: "payment",
-    keywords: [
-      "thanh toan",
-      "tra tien",
-      "payment",
-      "hinh thuc thanh toan",
-      "nhan nhung hinh thuc thanh toan nao",
-    ],
-    answer: () =>
-      `Hiện tại quán hỗ trợ: ${SHOP_INFO.payments}. Khi đặt món online, bạn có thể chọn thanh toán khi nhận hàng hoặc quét QR.`,
+    keywords: ["thanh toan", "tra tien", "payment", "hinh thuc thanh toan"],
+    answer: () => `Quán hỗ trợ: ${SHOP_INFO.payments} Bạn muốn thanh toán khi nhận hàng hay quét QR?`,
   },
 ];
 
-// Từ khóa (đã bỏ dấu để khớp với normalizeText)
-const PROMOTION_KEYWORDS = [
-  "khuyen mai",
-  "giam gia",
-  "uu dai",
-];
-
-const VOUCHER_KEYWORDS = [
-  "voucher",
-  "ma giam gia",
-  "doi diem",
-  "tich diem",
-  "diem tich luy",
-  "doi voucher",
-];
+const PROMOTION_KEYWORDS = ["khuyen mai", "uu dai", "giam gia"];
+// voucher đổi điểm
+const VOUCHER_KEYWORDS = ["voucher", "doi diem", "tich diem", "diem tich luy", "doi voucher"];
+// mã giảm giá / code (có thể là voucher hoặc promo)
+const DISCOUNT_CODE_KEYWORDS = ["ma giam gia", "code giam", "coupon", "coupon code"];
 
 // ==============================
-// 2. Chat TEXT
+// 8) TEXT CHAT
 // ==============================
 export const handleChatbotMessage = async (req, res) => {
   try {
     const { message, history } = req.body;
-
-    if (!message?.trim()) {
-      return res.status(400).json({ message: "Vui lòng nhập câu hỏi." });
-    }
+    if (!message?.trim()) return res.status(400).json({ message: "Vui lòng nhập câu hỏi." });
 
     const normalized = normalizeText(message);
 
-    // 2.0. Nếu khách hỏi rõ về voucher → trả lời trực tiếp từ DB voucher
-    const isVoucherIntent = VOUCHER_KEYWORDS.some((kw) =>
-      normalized.includes(kw)
-    );
+    // 8.1 FAQ direct
+    for (const rule of faqRules) {
+      if (rule.keywords.some((kw) => normalized.includes(kw))) {
+        return res.json({ reply: rule.answer() });
+      }
+    }
 
+    // 8.2 Intent: "đổi điểm lấy voucher như thế nào" => trả hướng dẫn (không phụ thuộc DB)
+    const isRedeemHowTo =
+      (normalized.includes("doi diem") || normalized.includes("tich diem") || normalized.includes("diem")) &&
+      (normalized.includes("nhu the nao") || normalized.includes("lam sao") || normalized.includes("cach"));
+
+    if (isRedeemHowTo) {
+      return res.json({ reply: clampReply(buildRedeemGuideText(), 4, 520) });
+    }
+
+    // 8.3 Intent: mã giảm giá hôm nay? => check BOTH promos & vouchers
+    const isDiscountCodeIntent = DISCOUNT_CODE_KEYWORDS.some((kw) => normalized.includes(kw));
+    if (isDiscountCodeIntent) {
+      try {
+        const [promos, vouchers] = await Promise.all([getActivePromotions(), getActiveRewardVouchers()]);
+        if (!promos.length && !vouchers.length) {
+          return res.json({
+            reply:
+              "Hiện mình chưa thấy khuyến mãi hoặc voucher nào đang mở.\n" +
+              "Bạn muốn mình gợi ý đồ uống theo khẩu vị (ít ngọt/đậm cà phê/ít caffeine) không?",
+          });
+        }
+
+        let reply = "";
+        if (promos.length) reply += buildPromotionsTextUser(promos) + "\n";
+        if (vouchers.length) reply += buildVoucherTextUser(vouchers) + "\n";
+        reply += "Bạn muốn mình gợi ý món phù hợp với ưu đãi nào không?";
+
+        reply = sanitizeUserFacingText(reply);
+        return res.json({ reply: clampReply(reply, 4, 520) });
+      } catch (e) {
+        console.error("Lỗi kiểm tra mã giảm giá:", e);
+        return res.json({
+          reply: "Mình chưa kiểm tra được ưu đãi lúc này. Bạn thử lại sau hoặc xem mục Khuyến mãi/Voucher trên website nhé.",
+        });
+      }
+    }
+
+    // 8.4 Intent: voucher đổi điểm (có voucher không?)
+    const isVoucherIntent = VOUCHER_KEYWORDS.some((kw) => normalized.includes(kw));
     if (isVoucherIntent) {
       try {
         const vouchers = await getActiveRewardVouchers();
         if (!vouchers.length) {
-          const reply =
-            "Mình vừa kiểm tra trong hệ thống thì hiện tại chưa có voucher đổi điểm nào đang mở. " +
-            "Bạn vẫn có thể tích điểm từ các đơn hàng để đổi voucher khi có chương trình mới nhé!";
-          return res.json({ reply });
+          return res.json({
+            reply:
+              "Hiện chưa có voucher đổi điểm đang mở.\n" +
+              "Bạn vẫn có thể tích điểm, khi có voucher mới mình sẽ gợi ý loại phù hợp nhé.",
+          });
         }
 
-        const voucherText = buildVoucherText(vouchers);
-        const reply =
-          "Mình kiểm tra trong hệ thống thì hiện tại có một số voucher đổi điểm như sau:\n\n" +
-          voucherText +
-          "\n\nĐể sử dụng, bạn đăng nhập tài khoản, vào mục 'Đổi thưởng' hoặc 'Ví voucher' để đổi và áp dụng khi thanh toán nhé.";
-
-        return res.json({ reply });
+        let reply = buildVoucherTextUser(vouchers) + "\nBạn muốn mình gợi ý voucher phù hợp theo giá trị đơn dự kiến không?";
+        reply = sanitizeUserFacingText(reply);
+        return res.json({ reply: clampReply(reply, 4, 520) });
       } catch (e) {
-        console.error("Lỗi lấy voucher cho chatbot:", e);
-        const reply =
-          "Hiện hệ thống voucher đang bị lỗi nên mình chưa xem được danh sách. " +
-          "Bạn giúp mình thử lại sau chút nhé hoặc xem trực tiếp ở mục Voucher trên website.";
-        return res.json({ reply });
+        console.error("Lỗi lấy voucher:", e);
+        return res.json({
+          reply: "Mình chưa tải được danh sách voucher lúc này. Bạn thử lại sau hoặc xem mục Voucher trên website nhé.",
+        });
       }
     }
 
-    // 2.0b. Khách hỏi khuyến mãi (không nhất thiết nói voucher)
-    const isPromotionIntent = PROMOTION_KEYWORDS.some((kw) =>
-      normalized.includes(kw)
-    );
-
+    // 8.5 Intent: promotion (khuyến mãi)
+    const isPromotionIntent = PROMOTION_KEYWORDS.some((kw) => normalized.includes(kw));
     if (isPromotionIntent) {
       try {
         const promos = await getActivePromotions();
-        const vouchers = await getActiveRewardVouchers();
-
-        if (!promos.length && !vouchers.length) {
-          const reply =
-            "Mình vừa kiểm tra trong hệ thống thì hiện tại quán chưa có chương trình khuyến mãi hay voucher nào đang chạy. " +
-            "Bạn vẫn có thể hỏi mình về menu hoặc gợi ý đồ uống phù hợp với sở thích của bạn nhé!";
-          return res.json({ reply });
+        if (!promos.length) {
+          return res.json({
+            reply: "Hiện chưa có khuyến mãi đang chạy.\nBạn muốn mình gợi ý đồ uống theo khẩu vị không?",
+          });
         }
 
-        const promoText = buildPromotionsText(promos);
-        const voucherText = buildVoucherText(vouchers);
-
-        let reply = "Mình vừa xem trong hệ thống, hiện tại có:\n\n";
-
-        if (promos.length) {
-          reply += promoText + "\n\n";
-        } else {
-          reply +=
-            "- Chưa có chương trình khuyến mãi trực tiếp nào đang chạy.\n\n";
-        }
-
-        if (vouchers.length) {
-          reply += voucherText + "\n\n";
-        } else {
-          reply +=
-            "- Chưa có voucher đổi điểm nào đang mở, bạn vẫn có thể tích điểm để đổi sau nhé.\n\n";
-        }
-
-        reply +=
-          "Nếu bạn muốn mình gợi ý món phù hợp với một chương trình cụ thể, bạn cứ nói rõ giúp mình nhé!";
-
-        return res.json({ reply });
+        let reply = buildPromotionsTextUser(promos) + "\nBạn muốn áp dụng cho món nào để mình gợi ý nhanh?";
+        reply = sanitizeUserFacingText(reply);
+        return res.json({ reply: clampReply(reply, 4, 520) });
       } catch (e) {
-        console.error("Lỗi lấy khuyến mãi + voucher cho chatbot:", e);
-        const reply =
-          "Hiện hệ thống khuyến mãi/voucher đang bị lỗi nên mình chưa xem được chương trình đang chạy. " +
-          "Bạn giúp mình thử lại sau hoặc xem trực tiếp ở mục Khuyến mãi / Voucher trên website nha.";
-        return res.json({ reply });
+        console.error("Lỗi lấy khuyến mãi:", e);
+        return res.json({
+          reply: "Mình chưa xem được khuyến mãi lúc này. Bạn thử lại sau hoặc xem mục Khuyến mãi trên website nhé.",
+        });
       }
     }
 
-    // 2.1. Thử match FAQ
-    for (const rule of faqRules) {
-      const hit = rule.keywords.some((kw) => normalized.includes(kw));
-      if (hit) {
-        const reply = rule.answer();
-        return res.json({ reply });
-      }
-    }
-
-    // 2.2. Lấy menu đầy đủ từ DB
+    // ==============================
+    // 8.6 Fallback to LLM (menu-based, giữ JSON flows)
+    // ==============================
     let products = [];
     try {
       products = await Product.findAll({
@@ -699,32 +464,28 @@ export const handleChatbotMessage = async (req, res) => {
       console.error("Lỗi lấy menu cho chatbot:", err);
     }
 
-    // 2.2.b. Lấy khuyến mãi & voucher từ DB cho system prompt
     let promotions = [];
     let vouchers = [];
     try {
       promotions = await getActivePromotions();
     } catch (err) {
-      console.error("Lỗi lấy khuyến mãi cho system prompt chatbot:", err);
+      console.error("Lỗi lấy khuyến mãi cho system prompt:", err);
     }
     try {
       vouchers = await getActiveRewardVouchers();
     } catch (err) {
-      console.error("Lỗi lấy voucher cho system prompt chatbot:", err);
+      console.error("Lỗi lấy voucher cho system prompt:", err);
     }
 
     const menuText = buildMenuText(products);
     const recommendationText = buildRecommendationText(products);
-    const promotionsText = buildPromotionsText(promotions);
-    const voucherText = buildVoucherText(vouchers);
-    const systemPrompt = buildSystemPrompt(
-      menuText,
-      recommendationText,
-      promotionsText,
-      voucherText
-    );
 
-    // 2.3. Chuẩn bị history
+    // dữ liệu cho model (không show ra UI)
+    const promotionsText = promosToPrompt(promotions);
+    const voucherText = vouchersToPrompt(vouchers);
+
+    const systemPrompt = buildSystemPrompt(menuText, recommendationText, promotionsText, voucherText);
+
     let chatHistory = [];
     if (Array.isArray(history)) {
       chatHistory = history
@@ -732,40 +493,30 @@ export const handleChatbotMessage = async (req, res) => {
         .slice(-8)
         .map((m) => ({
           role: m.role === "assistant" ? "assistant" : "user",
-          content: String(m.content).slice(0, 1000),
+          content: String(m.content).slice(0, 800),
         }));
     }
 
-    // 2.4. Gọi Groq
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...chatHistory,
-        { role: "user", content: message },
-      ],
-      temperature: 0.5,
-      max_tokens: 512,
+      messages: [{ role: "system", content: systemPrompt }, ...chatHistory, { role: "user", content: message }],
+      temperature: 0.35,
+      max_tokens: 260,
     });
 
     let reply =
       completion.choices?.[0]?.message?.content ||
-      "Xin lỗi, mình chưa hiểu ý bạn. Bạn có thể nói lại không?";
+      "Mình chưa hiểu ý bạn lắm. Bạn nói rõ hơn 1 chút giúp mình nhé.";
 
-    // 2.5. RESERVATION_JSON
+    // Parse RESERVATION_JSON
     let reservationData = null;
-    const match = reply.match(
-      /<RESERVATION_JSON>([\s\S]+?)<\/RESERVATION_JSON>/
-    );
-
+    const match = reply.match(/<RESERVATION_JSON>([\s\S]+?)<\/RESERVATION_JSON>/);
     if (match) {
       const jsonStr = match[1].trim();
       try {
         const parsed = JSON.parse(jsonStr);
         if (parsed && typeof parsed === "object") {
-          const rawDate = parsed.date || "";
-          const normalizedDate = normalizeReservationDate(rawDate);
-
+          const normalizedDate = normalizeReservationDate(parsed.date || "");
           reservationData = {
             name: String(parsed.name || "").slice(0, 100),
             phone: String(parsed.phone || "").slice(0, 20),
@@ -778,42 +529,51 @@ export const handleChatbotMessage = async (req, res) => {
       } catch (e) {
         console.warn("Không parse được RESERVATION_JSON:", e);
       }
-
       reply = reply.replace(match[0], "").trim();
     }
 
-    // 2.6. ORDER_JSON
+    // Parse ORDER_JSON
     let orderItems = null;
     const orderMatch = reply.match(/<ORDER_JSON>([\s\S]+?)<\/ORDER_JSON>/);
-
     if (orderMatch) {
       const jsonStr = orderMatch[1].trim();
       orderItems = mapOrderJsonToItems(jsonStr, products);
       reply = reply.replace(orderMatch[0], "").trim();
     }
 
+    reply = sanitizeUserFacingText(reply);
+    reply = clampReply(reply, 4, 520);
+
     return res.json({ reply, reservationData, orderItems });
   } catch (error) {
     console.error("Chatbot error:", error);
-    return res.status(500).json({
-      message: "Chatbot đang gặp lỗi, vui lòng thử lại.",
-    });
+    return res.status(500).json({ message: "Chatbot đang gặp lỗi, vui lòng thử lại." });
   }
 };
 
 // ==============================
-// 3. Chat bằng HÌNH ẢNH
+// Helpers for prompt-only (không show UI)
+// ==============================
+function promosToPrompt(promos = []) {
+  if (!promos.length) return "KHUYENMAI: none";
+  return "KHUYENMAI:\n" + promos.slice(0, 5).map((p) => `- ${p.ten_km} (${formatDate(p.ngay_bd)}→${formatDate(p.ngay_kt)})`).join("\n");
+}
+
+function vouchersToPrompt(vouchers = []) {
+  if (!vouchers.length) return "VOUCHER: none";
+  return "VOUCHER:\n" + vouchers.slice(0, 5).map((v) => `- ${v.name} (${v.points_cost} điểm)`).join("\n");
+}
+
+// ==============================
+// 9) IMAGE CHAT (ngắn gọn)
 // ==============================
 export const handleChatbotImageMessage = async (req, res) => {
   try {
     const { history } = req.body;
     const file = req.file;
 
-    if (!file) {
-      return res.status(400).json({ message: "Vui lòng gửi kèm hình ảnh." });
-    }
+    if (!file) return res.status(400).json({ message: "Vui lòng gửi kèm hình ảnh." });
 
-    // Lấy menu từ DB cho mode ảnh
     let products = [];
     try {
       products = await Product.findAll({
@@ -824,42 +584,33 @@ export const handleChatbotImageMessage = async (req, res) => {
       console.error("Lỗi lấy menu cho image chatbot:", err);
     }
 
-    // Lấy khuyến mãi & voucher cho mode ảnh
     let promotions = [];
     let vouchers = [];
     try {
       promotions = await getActivePromotions();
     } catch (err) {
-      console.error("Lỗi lấy khuyến mãi cho image chatbot:", err);
+      console.error("Lỗi lấy khuyến mãi cho image:", err);
     }
     try {
       vouchers = await getActiveRewardVouchers();
     } catch (err) {
-      console.error("Lỗi lấy voucher cho image chatbot:", err);
+      console.error("Lỗi lấy voucher cho image:", err);
     }
 
     const menuText = buildMenuText(products);
     const recommendationText = buildRecommendationText(products);
-    const promotionsText = buildPromotionsText(promotions);
-    const voucherText = buildVoucherText(vouchers);
-    const systemPrompt = buildSystemPrompt(
-      menuText,
-      recommendationText,
-      promotionsText,
-      voucherText
-    );
+    const promotionsText = promosToPrompt(promotions);
+    const voucherText = vouchersToPrompt(vouchers);
+    const systemPrompt = buildSystemPrompt(menuText, recommendationText, promotionsText, voucherText);
 
-    // Parse history từ FE
     let chatHistory = [];
     if (history) {
       try {
-        const parsed =
-          typeof history === "string" ? JSON.parse(history) : history;
-
+        const parsed = typeof history === "string" ? JSON.parse(history) : history;
         if (Array.isArray(parsed)) {
           chatHistory = parsed.slice(-8).map((m) => ({
             role: m.role === "assistant" ? "assistant" : "user",
-            content: String(m.content || "").slice(0, 1000),
+            content: String(m.content || "").slice(0, 800),
           }));
         }
       } catch (e) {
@@ -870,6 +621,16 @@ export const handleChatbotImageMessage = async (req, res) => {
     const base64Image = file.buffer.toString("base64");
     const dataUrl = `data:${file.mimetype};base64,${base64Image}`;
 
+    const imagePrompt = `
+Trả lời NGẮN GỌN tối đa 3 câu:
+- 1 câu mô tả nhanh đồ uống trong ảnh.
+- 1 câu gợi ý 1–2 món trong menu + giá (nếu không có đúng y hệt thì nói rõ và gợi ý 2 món gần nhất).
+- 1 câu hỏi chốt: bạn muốn thêm món nào vào giỏ / ít ngọt hay ngọt vừa?
+
+Không chia mục 1)2)3). Không dài dòng. Không bịa tên món ngoài menu.
+Nếu khách CHỐT muốn đặt theo ảnh ("lấy 2 ly giống hình", "thêm vào giỏ"), sinh <ORDER_JSON> ở cuối.
+`.trim();
+
     const completion = await groq.chat.completions.create({
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
@@ -878,43 +639,29 @@ export const handleChatbotImageMessage = async (req, res) => {
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text:
-                "Hãy phân tích hình ảnh này theo từng bước:\n" +
-                "1) Mô tả ngắn gọn hình ảnh (loại đồ uống/bánh, màu sắc, topping, cảm giác hương vị).\n" +
-                "2) Đoán xem đây là loại đồ uống/bánh gì.\n" +
-                "3) ĐỐI CHIẾU với menu ở trên:\n" +
-                '   - Nếu có món tương đương trong menu, hãy ghi rõ: "Trong menu quán, món này giống với [TÊN MÓN] (GIÁ VND)".\n' +
-                "   - Nếu không có món y hệt, hãy nói rõ quán không có món chính xác như vậy và gợi ý 2–4 món trong menu có hương vị/phong cách tương tự.\n" +
-                "4) Tất cả tên món và giá phải lấy từ danh sách menu, không bịa thêm món mới.\n" +
-                "5) Nếu khách có hỏi về khuyến mãi hoặc voucher, hãy dùng đúng các chương trình trong dữ liệu đã được cung cấp, không bịa thêm.",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: dataUrl,
-              },
-            },
+            { type: "text", text: imagePrompt },
+            { type: "image_url", image_url: { url: dataUrl } },
           ],
         },
       ],
-      temperature: 0.6,
-      max_tokens: 512,
+      temperature: 0.45,
+      max_tokens: 220,
     });
 
     let reply =
       completion.choices?.[0]?.message?.content ||
-      "Mình chưa đọc được hình này, bạn thử gửi lại giúp mình nhé.";
+      "Mình chưa đọc rõ hình này. Bạn thử gửi lại giúp mình nhé.";
 
     let orderItems = null;
     const orderMatch = reply.match(/<ORDER_JSON>([\s\S]+?)<\/ORDER_JSON>/);
-
     if (orderMatch) {
       const jsonStr = orderMatch[1].trim();
       orderItems = mapOrderJsonToItems(jsonStr, products);
       reply = reply.replace(orderMatch[0], "").trim();
     }
+
+    reply = sanitizeUserFacingText(reply);
+    reply = clampReply(reply, 3, 420);
 
     return res.json({ reply, orderItems });
   } catch (error) {
