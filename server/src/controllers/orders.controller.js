@@ -886,86 +886,81 @@ export async function exportAdminOrdersCsv(req, res) {
   }
 }
 
+// NOTE: consolidated daily/week/month stats handled by the implementation
+// below. Removed the older duplicate week/month-only function.
 /**
- * 📊 Thống kê đơn hàng (Admin) theo tuần / tháng
- * GET /api/admin/orders-stats?period=week|month
+ * 📊 Thống kê đơn hàng (Admin) theo ngày / tuần / tháng
+ * GET /api/admin/orders/stats?period=day|week|month&date=YYYY-MM-DD (optional for day)
  */
 export async function getAdminOrderStats(req, res) {
   try {
     const period = (req.query.period || "month").toLowerCase();
+    const date = req.query.date; // YYYY-MM-DD (optional)
 
-    // Xác định khoảng thời gian
-    let range;
-    if (period === "week") {
-      range = getCurrentWeekRange();
+    let start, end;
+
+    if (period === "day") {
+      // Nếu có date thì lấy đúng ngày đó, không có thì lấy hôm nay
+      const d = date ? new Date(`${date}T00:00:00`) : new Date();
+
+      if (date) {
+        start = new Date(`${date}T00:00:00`);
+        end = new Date(`${date}T23:59:59.999`);
+      } else {
+        // hôm nay (local)
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const todayStr = `${y}-${m}-${dd}`;
+        start = new Date(`${todayStr}T00:00:00`);
+        end = new Date(`${todayStr}T23:59:59.999`);
+      }
+    } else if (period === "week") {
+      const range = getCurrentWeekRange();
+      start = range.start;
+      end = range.end;
     } else {
-      // mặc định: tháng
-      range = getCurrentMonthRange();
+      const range = getCurrentMonthRange();
+      start = range.start;
+      end = range.end;
     }
 
-    const { start, end } = range;
-
-    // Điều kiện theo ngày đặt
     const baseWhere = {
       ngay_dat: { [Op.between]: [start, end] },
     };
 
-    // Tổng số đơn trong kỳ
-    const totalOrders = await Order.count({
-      where: baseWhere,
-    });
+    const totalOrders = await Order.count({ where: baseWhere });
 
-    // Số đơn hoàn thành trong kỳ
     const completedOrders = await Order.count({
-      where: {
-        ...baseWhere,
-        trang_thai: { [Op.in]: SUCCESS_ORDER_STATUSES },
-      },
+      where: { ...baseWhere, trang_thai: { [Op.in]: SUCCESS_ORDER_STATUSES } },
     });
 
-    // Số đơn đã hủy trong kỳ
     const cancelledOrders = await Order.count({
-      where: {
-        ...baseWhere,
-        trang_thai: { [Op.in]: CANCELLED_ORDER_STATUSES },
-      },
+      where: { ...baseWhere, trang_thai: { [Op.in]: CANCELLED_ORDER_STATUSES } },
     });
 
-    // Doanh thu trong kỳ (chỉ tính đơn thành công)
     const revenue = await Order.sum("tong_tien", {
-      where: {
-        ...baseWhere,
-        trang_thai: { [Op.in]: SUCCESS_ORDER_STATUSES },
-      },
+      where: { ...baseWhere, trang_thai: { [Op.in]: SUCCESS_ORDER_STATUSES } },
     });
 
-    // Tính %
     const completedPercent =
-      totalOrders > 0
-        ? Math.round((completedOrders * 100) / totalOrders)
-        : 0;
+      totalOrders > 0 ? Math.round((completedOrders * 100) / totalOrders) : 0;
 
     const cancelledPercent =
-      totalOrders > 0
-        ? Math.round((cancelledOrders * 100) / totalOrders)
-        : 0;
+      totalOrders > 0 ? Math.round((cancelledOrders * 100) / totalOrders) : 0;
 
     return res.json({
       success: true,
       data: {
         period,
-        range: {
-          start,
-          end,
-        },
+        range: { start, end },
         totalOrders,
         completedOrders,
         cancelledOrders,
         completedPercent,
         cancelledPercent,
         periodRevenue: Number(revenue) || 0,
-        // Giữ compatibility với code FE cũ (periodRevenue vs revenue)
-        revenue: Number(revenue) || 0,
+        revenue: Number(revenue) || 0, // giữ compatibility
       },
     });
   } catch (err) {
